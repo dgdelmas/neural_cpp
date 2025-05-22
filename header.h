@@ -68,3 +68,28 @@ void to_binary(int i, double * y, int L){ // L = len(y); y = binary representati
         y[k] = (((int)y[k])/(2<<(L-k-2)))%2;
     }
 }
+
+void progress_bar_before(int i, int epochs, int max_bar = 20){ // displays a progress bar while training
+    if(i < (epochs/max_bar)*max_bar){
+        cout << "[";
+        for(int j=0;j<i % max_bar;j++) cout << "#";
+        for(int j=i % max_bar;j<min(epochs,max_bar)-1;j++) cout << " ";
+        cout << "] + " << (epochs/max_bar) - (i/max_bar);
+        for(int j=0;j<int(log10(epochs/max_bar))+1;j++) cout << " ";
+    }
+    else{
+        cout << "[";
+        for(int j=0;j<i % max_bar;j++) cout << "#";
+        for(int j=i % max_bar;j< epochs% max_bar-1;j++) cout << " ";
+        cout << "]    ";
+        for(int j=epochs% max_bar;j<min(epochs,max_bar)-1;j++) cout << " ";
+        for(int j=0;j<int(log10(epochs/max_bar))+1;j++) cout << " ";
+    }
+}
+void progress_bar_after(int i, int epochs, int max_bar = 20){
+    cout << "\b\b";
+    for(int j=0;j<min(epochs,max_bar)-1;j++) cout << "\b";
+    cout << "\b\b\b\b";
+    for(int j=0;j<int(log10((epochs/max_bar) - (i/max_bar)))+3; j++) cout << "\b";
+    for(int j=0;j<int(log10(epochs/max_bar))+1;j++) cout << "\b";
+}

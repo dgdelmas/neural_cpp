@@ -570,7 +570,7 @@ class network{
             return C;
         }
 
-        void train(double **** x, double ** y, int sample_size, int batch_size, double LR, int epochs){ // trains network, using rank-3 input
+        void train(double **** x, double ** y, int sample_size, int batch_size, double LR, int epochs, bool prog_bar = true){ // trains network, using rank-3 input
             // TODO: option to shuffle mini batches
 
             if(sample_size % batch_size !=0) cerr << "warning, mini-batches don't fit!\n";
@@ -582,6 +582,7 @@ class network{
             for(int ep=0;ep<epochs;ep++){
                 //cout << " " << cost(x,y,sample_size) << ",";
                 //cout.flush();
+                if(prog_bar) progress_bar_before(ep,epochs,40);
                 for(int t=0;t<sample_size/batch_size;t++){
                     set_j_to_zero();
                     for(int u=0;u<batch_size;u++){
@@ -590,6 +591,7 @@ class network{
                     }
                     run_adam(beta1,beta2,LR);
                 }
+                if(prog_bar) progress_bar_after(ep,epochs,40);
             }
             cout << "\n[done; cost = " << cost(x,y,sample_size) << "]" << endl;
         }

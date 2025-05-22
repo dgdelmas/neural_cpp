@@ -144,6 +144,7 @@ class layer{
                     delete[] weights;
                     delete[] biases;
                     delete[] p_d;
+                    delete[] q_d;
                 }
                 else if(type == "conv"){
                     delete[] biases;
@@ -170,8 +171,10 @@ class layer{
                 assert(initializedQ);
             }
             if(type == "dense"){
-                for(int i=0;i<n_out;i++) for(int j=0;j<n_in;j++) weights[i][j] = rand_U(scale);
-                for(int i=0;i<n_out;i++)                         biases[i] = 0.1*rand_U(scale);
+                for(int i=0;i<n_out;i++){
+                    biases[i] = 0.1*rand_U(scale);
+                    for(int j=0;j<n_in;j++) weights[i][j] = rand_U(scale);
+                }
             }
             else if(type == "conv"){
                 for(int i=0;i<out_d;i++) for(int j=0;j<inp_d;j++) for(int k=0;k<f_v;k++) for(int l=0;l<f_h;l++) filter[i][j][k][l] = rand_U(scale);
@@ -281,7 +284,7 @@ class layer{
 class network{
     /*Class for neural network. For now, only supports convolutional and dense layers, as well as softmax. Fully connected network is fine, i.e., conv layers need not
     appear at all, but if they do, they can never postcede a dense one, and last layer must always be dense (or dense plus softmax). If last layer is softmax, it is
-    recommended to use `activ = id` for the previous layer, so that the input to softmax is a logit.
+    recommended to use `activ = id` (or `relu`) for the previous layer, so that the input to softmax is a logit instead of a probability.
 
     To do: option for maxpool, batch normalization, xavier-he initialization, etc.
 
@@ -293,13 +296,20 @@ class network{
     L[1].set("dense",9);
     network NN({3,10,10},L,depth);
 
-    If all layers are dense, input size is allowed to be either 3-dim as above, or 1-dim.
+    If all layers are dense, input size is allowed to be either 3-dim as above, or 1-dim. For example, if the input is 1-dim with length six, and the network consists
+    of one dense layer with 11 neurons and one with 15 neurons, plus a softmax layer, then we can declare this as follows:
+    int depth = 3;
+    layer L[depth];
+    L[0].set("dense",11);
+    L[1].set("dense",15); L[1].activ = id;
+    L[2].set("softmax");
+    network NN({6},L,depth);
 
     The default loss function is least squares, loss(a,b) = .5*(a-b)*(a-b), user-defined functions are allowed, handled via the `loss` struct defined in the `header.h`
-    file.
+    file. For example, use `NN.loss_fnc = log_like;` for cross-entropy.
 
     Training is done using the Adam method, with default parameters `adam_b1 = 0.9` and `adam_b2 = 0.999`. Run `NN.train(x, y, sample_size, batch_size,
-    learning_rate, number_of_epochs)` to run mini-batch gradient descent, minimizing `sum_s loss(p(x[s]),y[s])`.
+    learning_rate, number_of_epochs)` to run mini-batch gradient descent, minimizing `sum_s loss_fnc(p(x[s]),y[s])`.
 
     To do: allow for other grad-desc methods.
 
@@ -326,18 +336,18 @@ class network{
             arch = list_of_layers;
             depth = list_length;
 
-            for(int l=0;l<depth-1;l++){
+            for(int l=0;l<depth-1;l++){ // check that there are no intermediate softmax layers
                 if(arch[l].type == "softmax") cerr << "Only last layer may be softmax!\n";
                 assert(arch[l].type != "softmax");
             }
-            if(arch[depth-1].type == "softmax"){
+            if(arch[depth-1].type == "softmax"){ // check if last layer is softmax or not
                 softmaxQ = true;
                 depth--;
                 if(depth == 0) cerr << "At least one dense layer required.\n";
                 assert(depth > 0);
             }
 
-            for(int l=0;l<depth;l++){
+            for(int l=0;l<depth;l++){ // count how many conv layers there are, and that they all appear at the beginning
                 if(arch[l].type == "conv"){
                     num_of_conv++;
                     if(l>0 && arch[l-1].type != "conv"){
@@ -350,7 +360,7 @@ class network{
                 cerr << "Must have at least one dense layer.\n";
                 assert(false);
             }
-            if(arch[0].type == "conv"){
+            if(arch[0].type == "conv"){ // initializes conv layers
                 if(inputDims.size() != 3){
                     cerr << "Unclear initializer: first argument to network must be a list of three positive integers.\n";
                     assert(false);
@@ -373,7 +383,7 @@ class network{
                 output_size_v = arch[num_of_conv-1].out_v;
                 output_size_h = arch[num_of_conv-1].out_h;
             }
-            else if(arch[0].type == "dense"){
+            else if(arch[0].type == "dense"){ // initializes dense layers
                 if(inputDims.size() == 1) input_size_dense = *(inputDims.begin());
                 else if(inputDims.size() == 3){
                     input_size_d = *(inputDims.begin());
@@ -405,54 +415,54 @@ class network{
             }
 
 
-            Xi_d = new double*[depth-num_of_conv];
+            Xi_d = new double*[depth-num_of_conv]; // d(cost)/d(bias) for a single sample, for dense layers
             for(int l=0;l<depth-num_of_conv;l++) Xi_d[l] = new double[arch[l+num_of_conv].n_out];
 
-            Xi_c = new double***[num_of_conv];
+            Xi_c = new double***[num_of_conv]; // d(cost)/d(bias) for a single sample, for conv layers
             for(int l=0;l<num_of_conv;l++) Xi_c[l] = new double**[arch[l].out_d];
             for(int l=0;l<num_of_conv;l++) for(int i=0;i<arch[l].out_d;i++) Xi_c[l][i] = new double*[arch[l].out_v];
             for(int l=0;l<num_of_conv;l++) for(int i=0;i<arch[l].out_d;i++) for(int j=0;j<arch[l].out_v;j++) Xi_c[l][i][j] = new double[arch[l].out_h];
 
-            flatten = new double[input_size_dense];
+            flatten = new double[input_size_dense]; // flattens rank-3 output into rank-1
 
-            jf_c = new double****[num_of_conv];
+            jf_c = new double****[num_of_conv]; // d(cost)/d(filter), for conv layer
             for(int l=0;l<num_of_conv;l++) jf_c[l] = new double***[arch[l].out_d];
             for(int l=0;l<num_of_conv;l++) for(int a=0;a<arch[l].out_d;a++) jf_c[l][a] = new double**[arch[l].inp_d];
             for(int l=0;l<num_of_conv;l++) for(int a=0;a<arch[l].out_d;a++) for(int i=0;i<arch[l].inp_d;i++) jf_c[l][a][i] = new double*[arch[l].f_v];
             for(int l=0;l<num_of_conv;l++) for(int a=0;a<arch[l].out_d;a++) for(int i=0;i<arch[l].inp_d;i++) for(int j=0;j<arch[l].f_v;j++) jf_c[l][a][i][j] = new double[arch[l].f_h];
-            mf_c = new double****[num_of_conv];
+            mf_c = new double****[num_of_conv]; // for Adam
             for(int l=0;l<num_of_conv;l++) mf_c[l] = new double***[arch[l].out_d];
             for(int l=0;l<num_of_conv;l++) for(int a=0;a<arch[l].out_d;a++) mf_c[l][a] = new double**[arch[l].inp_d];
             for(int l=0;l<num_of_conv;l++) for(int a=0;a<arch[l].out_d;a++) for(int i=0;i<arch[l].inp_d;i++) mf_c[l][a][i] = new double*[arch[l].f_v];
             for(int l=0;l<num_of_conv;l++) for(int a=0;a<arch[l].out_d;a++) for(int i=0;i<arch[l].inp_d;i++) for(int j=0;j<arch[l].f_v;j++) mf_c[l][a][i][j] = new double[arch[l].f_h];
-            vf_c = new double****[num_of_conv];
+            vf_c = new double****[num_of_conv]; // for Adam
             for(int l=0;l<num_of_conv;l++) vf_c[l] = new double***[arch[l].out_d];
             for(int l=0;l<num_of_conv;l++) for(int a=0;a<arch[l].out_d;a++) vf_c[l][a] = new double**[arch[l].inp_d];
             for(int l=0;l<num_of_conv;l++) for(int a=0;a<arch[l].out_d;a++) for(int i=0;i<arch[l].inp_d;i++) vf_c[l][a][i] = new double*[arch[l].f_v];
             for(int l=0;l<num_of_conv;l++) for(int a=0;a<arch[l].out_d;a++) for(int i=0;i<arch[l].inp_d;i++) for(int j=0;j<arch[l].f_v;j++) vf_c[l][a][i][j] = new double[arch[l].f_h];
 
-            jb_c = new double*[num_of_conv];
+            jb_c = new double*[num_of_conv]; // d(cost)/d(bias), for conv layer
             for(int l=0;l<num_of_conv;l++) jb_c[l] = new double[arch[l].out_d];
-            mb_c = new double*[num_of_conv];
+            mb_c = new double*[num_of_conv]; // for Adam
             for(int l=0;l<num_of_conv;l++) mb_c[l] = new double[arch[l].out_d];
-            vb_c = new double*[num_of_conv];
+            vb_c = new double*[num_of_conv]; // for Adam
             for(int l=0;l<num_of_conv;l++) vb_c[l] = new double[arch[l].out_d];
 
-            jw_d = new double**[depth-num_of_conv];
+            jw_d = new double**[depth-num_of_conv]; // d(cost)/d(weight), for dense
             for(int i=0;i<depth-num_of_conv;i++) jw_d[i] = new double*[arch[i+num_of_conv].n_out];
             for(int i=0;i<depth-num_of_conv;i++) for(int j=0;j<arch[i+num_of_conv].n_out;j++) jw_d[i][j] = new double[arch[i+num_of_conv].n_in];
-            mw_d = new double**[depth-num_of_conv];
+            mw_d = new double**[depth-num_of_conv]; // for Adam
             for(int i=0;i<depth-num_of_conv;i++) mw_d[i] = new double*[arch[i+num_of_conv].n_out];
             for(int i=0;i<depth-num_of_conv;i++) for(int j=0;j<arch[i+num_of_conv].n_out;j++) mw_d[i][j] = new double[arch[i+num_of_conv].n_in];
-            vw_d = new double**[depth-num_of_conv];
+            vw_d = new double**[depth-num_of_conv]; // for Adam
             for(int i=0;i<depth-num_of_conv;i++) vw_d[i] = new double*[arch[i+num_of_conv].n_out];
             for(int i=0;i<depth-num_of_conv;i++) for(int j=0;j<arch[i+num_of_conv].n_out;j++) vw_d[i][j] = new double[arch[i+num_of_conv].n_in];
 
-            jb_d = new double*[depth-num_of_conv];
+            jb_d = new double*[depth-num_of_conv]; // d(cost)/d(bias), for dense
             for(int i=0;i<depth-num_of_conv;i++) jb_d[i] = new double[arch[i+num_of_conv].n_out];
-            mb_d = new double*[depth-num_of_conv];
+            mb_d = new double*[depth-num_of_conv]; // for Adam
             for(int i=0;i<depth-num_of_conv;i++) mb_d[i] = new double[arch[i+num_of_conv].n_out];
-            vb_d = new double*[depth-num_of_conv];
+            vb_d = new double*[depth-num_of_conv]; // for Adam
             for(int i=0;i<depth-num_of_conv;i++) vb_d[i] = new double[arch[i+num_of_conv].n_out];
 
             if(print_details){
@@ -462,7 +472,7 @@ class network{
             }
 
         }
-        ~network(){
+        ~network(){ // frees allocated arrays
 
             for(int l=0;l<depth-num_of_conv;l++) delete[] Xi_d[l];
             delete[] Xi_d;
@@ -513,10 +523,10 @@ class network{
             for(int i=0;i<depth-num_of_conv;i++) delete[] vb_d[i];
             delete[] vb_d;
         }
-        void randomize(double scale = 1){
+        void randomize(double scale = 1){ // randomizes weights and biases
             for(int i=0;i<depth;i++) arch[i].randomize(scale);
         }
-        void forward(double * input){
+        void forward(double * input){ // performs forward pass, with rank-1 input (fully connected networks only)
             if(num_of_conv != 0){
                 cerr << "Error: input to conv layer must be a rank-3 array.\n";
                 assert(false);
@@ -524,7 +534,7 @@ class network{
             arch[0].forward(input);
             for(int i=1;i<depth+softmaxQ;i++) arch[i].forward(arch[i-1].p_d);
         }
-        void forward(double *** input){
+        void forward(double *** input){ // performs forward pass, with rank-3 input
             if(num_of_conv == 0){
                 if(input_size_h*input_size_v*input_size_d == 0) cerr << "Error: cannot read rank-3 data without size information!\n";
                 assert(input_size_h*input_size_v*input_size_d > 0);
@@ -539,7 +549,7 @@ class network{
             for(int i=num_of_conv+1;i<depth+softmaxQ;i++) arch[i].forward(arch[i-1].p_d);
 
         }
-        double cost(double **** x, double ** y, int sample_size){
+        double cost(double **** x, double ** y, int sample_size){ // computes C = sum_s loss(x[s],y[s])
             double C = 0;
             for(int s=0;s<sample_size;s++){
                 forward(x[s]);
@@ -560,7 +570,9 @@ class network{
             return C;
         }
 
-        void train(double **** x, double ** y, int sample_size, int batch_size, double LR, int epochs){
+        void train(double **** x, double ** y, int sample_size, int batch_size, double LR, int epochs){ // trains network, using rank-3 input
+            // TODO: option to shuffle mini batches
+
             if(sample_size % batch_size !=0) cerr << "warning, mini-batches don't fit!\n";
             cout << "[training...]";
             double beta1, beta2;
@@ -568,8 +580,8 @@ class network{
             set_mv_to_zero(); // this and previous line: apparently, inside `ep` loop works better if `epochs` is small...
 
             for(int ep=0;ep<epochs;ep++){
-                cout << " " << cost(x,y,sample_size) << ",";
-                cout.flush();
+                //cout << " " << cost(x,y,sample_size) << ",";
+                //cout.flush();
                 for(int t=0;t<sample_size/batch_size;t++){
                     set_j_to_zero();
                     for(int u=0;u<batch_size;u++){
@@ -582,7 +594,7 @@ class network{
             cout << "\n[done; cost = " << cost(x,y,sample_size) << "]" << endl;
         }
 
-        void train(double ** x, double ** y, int sample_size, int batch_size, double LR, int epochs){ // perhaps delete this and replace `double **** x` by `auto` (compile with -fconcepts)
+        void train(double ** x, double ** y, int sample_size, int batch_size, double LR, int epochs){ // trains network, using rank-3 input
             if(num_of_conv != 0){
                 cerr << "Error: input to conv layer must be a rank-3 array.\n";
                 assert(false);
@@ -594,8 +606,8 @@ class network{
             set_mv_to_zero();
 
             for(int ep=0;ep<epochs;ep++){
-                cout << " " << cost(x,y,sample_size) << ",";
-                cout.flush();
+                //cout << " " << cost(x,y,sample_size) << ",";
+                //cout.flush();
                 for(int t=0;t<sample_size/batch_size;t++){
                     set_j_to_zero();
                     for(int u=0;u<batch_size;u++){
@@ -608,9 +620,9 @@ class network{
             cout << "\n[done; cost = " << cost(x,y,sample_size) << "]\n";
         }
 
-        void print_to_file(string filename = ""){
+        void print_to_file(string filename = ""){ // prints weights and biases to textfile
             string name_of_file;
-            if(filename == "") name_of_file = "neural_"+to_string(input_size_d)+"_"+to_string(input_size_v)+"_"+to_string(input_size_h)+"_"+to_string(output_size_dense)+".txt";
+            if(filename == "") name_of_file = "nn_data_"+to_string(input_size_d)+"_"+to_string(input_size_v)+"_"+to_string(input_size_h)+"_"+to_string(output_size_dense)+".txt";
             else name_of_file = filename;
             ofstream myfile;
             myfile.open(name_of_file);
@@ -637,9 +649,9 @@ class network{
             }
             myfile.close();
         }
-        void read_from_file(string filename = ""){
+        void read_from_file(string filename = ""){ // loads weights and biases from textfile
             string name_of_file, str;
-            if(filename == "") name_of_file = "neural_"+to_string(input_size_d)+"_"+to_string(input_size_v)+"_"+to_string(input_size_h)+"_"+to_string(output_size_dense)+".txt";
+            if(filename == "") name_of_file = "nn_data_"+to_string(input_size_d)+"_"+to_string(input_size_v)+"_"+to_string(input_size_h)+"_"+to_string(output_size_dense)+".txt";
             else name_of_file = filename;
             ifstream myfile;
             myfile.open(name_of_file);
@@ -714,8 +726,8 @@ class network{
         bool softmaxQ = false; // is there a softmax layer or not
         int num_of_conv = 0; // number of conv layers
         double * flatten; // flatten rank-3 into linear array
-        double ** Xi_d; // d(cost)/d(p), for dense layers
-        double **** Xi_c; // d(cost)/d(p), for conv layers
+        double ** Xi_d; // d(cost)/d(bias), for dense layers, for a single sample
+        double **** Xi_c; // d(cost)/d(bias), for conv layers, for a single sample
 
         double ***** jf_c; // d(cost)/d(filter) for conv
         double ***** mf_c; // for momentum

@@ -37,25 +37,14 @@ int main(){
     file.close();
 
     int n_tr = 55000;
-    double **** x_tr, **** x_te;
-    double ** y_tr, ** y_te;
-    x_tr = new double***[n_tr]; y_tr = new double*[n_tr];
-    for(int i=0;i<n_tr;i++){
-        x_tr[i] = new double**[in_d];
-        for(int j=0;j<in_d;j++) x_tr[i][j] = new double*[in_v];
-        for(int j=0;j<in_d;j++) for(int k=0;k<in_v;k++) x_tr[i][j][k] = new double[in_h];
-        y_tr[i] = new double[10];
-    }
+    double **** x_te;
+    double ** y_te;
     x_te = new double***[n_samp-n_tr]; y_te = new double*[n_samp-n_tr];
     for(int i=0;i<n_samp-n_tr;i++){
         x_te[i] = new double**[in_d];
         for(int j=0;j<in_d;j++) x_te[i][j] = new double*[in_v];
         for(int j=0;j<in_d;j++) for(int k=0;k<in_v;k++) x_te[i][j][k] = new double[in_h];
         y_te[i] = new double[10];
-    }
-    for(int i=0;i<n_tr;i++){
-        for(int j=0;j<in_d;j++) for(int k=0;k<in_v;k++) for(int n=0;n<in_h;n++) x_tr[i][j][k][n] = x[i][j][k][n];
-        for(int j=0;j<10;j++) y_tr[i][j] = y[i][j];
     }
     for(int i=0;i<n_samp-n_tr;i++){
         for(int j=0;j<in_d;j++) for(int k=0;k<in_v;k++) for(int n=0;n<in_h;n++) x_te[i][j][k][n] = x[i+n_tr][j][k][n];
@@ -67,10 +56,8 @@ int main(){
     layer L[depth];
     L[0].set("conv",3); L[0].f_v = 7; L[0].f_h = 7;
     L[1].set("conv",6); L[1].f_v = 5; L[1].f_h = 5;
-    //L[2].set("conv",9); L[2].f_v = 3; L[2].f_h = 3;
     L[2].set("dense",10);
     L[3].set("dense",10); L[3].activ = id;
-    //L[3].set("dense",10); L[3].activ = id;
     L[4].set("softmax");
 
     network N({in_d,in_v,in_h},L,depth);
@@ -78,7 +65,7 @@ int main(){
     N.randomize();
     //N.read_from_file();
 
-    N.train(x_tr, y_tr, n_tr, 500, .02, 2);
+    N.train(x, y, n_tr, 500, .02, 2);
     //N.print_to_file();
 
     double correct = 0, all = 0;

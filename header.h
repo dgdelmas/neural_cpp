@@ -1,8 +1,8 @@
 using namespace std;
 
-void here(int i){cout << "here " << i << endl; cout.flush();} // for debugging
+void here(int i){cout << "here " << i << endl;} //debugging
 
-double rand_U(double width){ // uniform random number
+double rand_U(double width){
     return width*(2*(((double)rand())/RAND_MAX)-1);
 }
 
@@ -60,7 +60,7 @@ const activation quad([](double x)->double {return x*sqrt(x*x+1.);}, [](double x
 const loss least_sq([](double x,double y)->double {return 0.5*(x-y)*(x-y);}, [](double x, double y)->double {return x-y;}, "least squares");
 const loss log_like([](double x,double y)->double {return -y*log(x+.000000001)-(1-y)*log(1-x+.000000001);}, [](double x, double y)->double {return -y/(x+.000000001)+(1-y)/(1-x+.000000001);}, "cross-entropy");
 
-void to_binary(int i, double * y, int L){ // L = len(y); y = binary representation of i
+void to_binary(int i, double * y, int L){ // L = len(y). y = binary representation of i
     y[L-1] = i%2;
     for(int k=L-2;k>=0;k--){
         y[k] = i;

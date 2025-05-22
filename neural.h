@@ -574,7 +574,7 @@ class network{
             // TODO: option to shuffle mini batches
 
             if(sample_size % batch_size !=0) cerr << "warning, mini-batches don't fit!\n";
-            cout << "[training...]";
+            cout << "[training...]"; cout.flush();
             double beta1, beta2;
             beta1 = adam_b1, beta2 = adam_b2;
             set_mv_to_zero(); // this and previous line: apparently, inside `ep` loop works better if `epochs` is small...
@@ -600,7 +600,7 @@ class network{
                 assert(false);
             }
             if(sample_size % batch_size !=0) cout << "warning, batches don't fit!\n";
-            cout << "[training...]";
+            cout << "[training...]"; cout.flush();
             double beta1, beta2;
             beta1 = adam_b1, beta2 = adam_b2;
             set_mv_to_zero();

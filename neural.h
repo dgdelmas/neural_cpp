@@ -591,7 +591,10 @@ class network{
                         update_derivatives(x[t*batch_size+u],y[t*batch_size+u],batch_size*output_size_dense);
                     }
                     run_adam(beta1,beta2,LR);
-                    if(prog_bar) {progress_bar_after(t,sample_size/batch_size+1,40); cout.flush();}
+                    if(prog_bar){
+                        progress_bar_after(t,sample_size/batch_size+1,40);
+                        cout << " cost = " << cost(x,y,sample_size) << endl;
+                    }
                 }
                 //if(prog_bar) {progress_bar_after(ep,epochs+1,40); cout.flush();}
             }

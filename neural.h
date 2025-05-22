@@ -582,7 +582,7 @@ class network{
             for(int ep=0;ep<epochs;ep++){
                 //cout << " " << cost(x,y,sample_size) << ",";
                 //cout.flush();
-                if(prog_bar) progress_bar_before(ep,epochs+1,40);
+                if(prog_bar) {progress_bar_before(ep,epochs+1,40); cout.flush();}
                 for(int t=0;t<sample_size/batch_size;t++){
                     set_j_to_zero();
                     for(int u=0;u<batch_size;u++){
@@ -591,7 +591,7 @@ class network{
                     }
                     run_adam(beta1,beta2,LR);
                 }
-                if(prog_bar) {progress_bar_after(ep,epochs+1,40); cout.flush();}
+                if(prog_bar) progress_bar_after(ep,epochs+1,40);
             }
             cout << "\n[done; cost = " << cost(x,y,sample_size) << "]" << endl;
         }

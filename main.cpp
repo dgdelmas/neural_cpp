@@ -2,7 +2,6 @@
 #include <fstream>
 #include <random>
 #include <cassert>
-#include <chrono>
 #include <unistd.h>
 
 #include "header.h"
@@ -79,10 +78,7 @@ int main(){
     //N.randomize();
     N.read_from_file();
 
-    steady_clock::time_point begin = steady_clock::now();
     N.train(x_tr, y_tr, n_tr, 500, .02, 2);
-    steady_clock::time_point end = steady_clock::now();
-    cout << "Training time: " << duration_cast<milliseconds>(end - begin).count() << " ms\n" << endl;
     N.print_to_file();
 
     double correct = 0, all = 0;
@@ -94,53 +90,6 @@ int main(){
         correct += (y_te[s][max] == 1);
     }
     cout << "Accuracy: " << 100*correct/all << "%\n";
-
-    cout << "set_mv_to_zero: " << t_mv/1000000000. << " s" << endl;
-    cout << "set_j_to_zero: " << t_j/1000000000. << " s" << endl;
-    cout << "forward: " << t_forw/1000000000. << " s" << endl;
-    //cout << "backward: " << t_back/1000000000. << " s" << endl;
-    cout << "update_derivatives: " << t_update/1000000000. << " s" << endl;
-    cout << "run_adam: " << t_adam/1000000000. << " s" << endl;
-
-
-
-
-    return 0;
-}
-
-int main_old(){
-
-    int n_samp = 20, i_d = 2, i_v = 7, i_h = 9, n_o = 3;
-    double **** x;
-    x = new double***[n_samp];
-    for(int i=0;i<n_samp;i++) x[i] = new double**[i_d];
-    for(int i=0;i<n_samp;i++) for(int j=0;j<i_d;j++) x[i][j] = new double*[i_v];
-    for(int i=0;i<n_samp;i++) for(int j=0;j<i_d;j++) for(int k=0;k<i_v;k++) x[i][j][k] = new double[i_h];
-    for(int i=0;i<n_samp;i++) for(int j=0;j<i_d;j++) for(int k=0;k<i_v;k++) for(int l=0;l<i_h;l++) x[i][j][k][l] = rand_U(2);
-
-
-    double ** y;
-    y = new double*[n_samp];
-    for(int i=0;i<n_samp;i++) y[i] = new double[n_o];
-    for(int i=0;i<n_samp;i++) for(int j=0;j<n_o;j++) y[i][j] = 1+rand_U(1);
-
-
-
-    int depth = 5;
-    layer L[depth];
-    L[0].set("conv",3); L[0].f_v = 2; L[0].stride_h = 2; 
-    L[1].set("conv",3); L[1].stride_v = 3;
-    L[2].set("dense",4);
-    L[3].set("dense",3);
-    L[4].set("softmax");
-
-    network N({i_d,i_v,i_h},L,depth);
-    N.loss_fnc = least_sq;
-    N.randomize();
-
-    N.train(x,y,n_samp,n_samp,.1,100);
-
-
 
     return 0;
 }

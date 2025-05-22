@@ -1,8 +1,4 @@
 using namespace std;
-using namespace std::chrono;
-
-steady_clock::time_point b_mv, b_j, b_forw, b_back, b_update, b_adam;
-double t_mv = 0, t_j = 0, t_forw = 0, t_back = 0, t_update = 0, t_adam = 0;
 
 void here(int i){cout << "here " << i << endl;} //debugging
 

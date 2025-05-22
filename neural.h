@@ -565,29 +565,18 @@ class network{
             cout << "[training...]";
             double beta1, beta2;
             beta1 = adam_b1, beta2 = adam_b2;
-            b_mv = steady_clock::now();
             set_mv_to_zero(); // this and previous line: apparently, inside `ep` loop works better if `epochs` is small...
-            t_mv += duration_cast<nanoseconds>(steady_clock::now() - b_mv).count();
 
             for(int ep=0;ep<epochs;ep++){
                 cout << " " << cost(x,y,sample_size) << ",";
                 cout.flush();
                 for(int t=0;t<sample_size/batch_size;t++){
-                    b_j = steady_clock::now();
                     set_j_to_zero();
-                    t_j += duration_cast<nanoseconds>(steady_clock::now() - b_j).count();
                     for(int u=0;u<batch_size;u++){
-                        b_forw = steady_clock::now();
                         forward(x[t*batch_size+u]);
-                        t_forw += duration_cast<nanoseconds>(steady_clock::now() - b_forw).count();
-                        b_update = steady_clock::now();
                         update_derivatives(x[t*batch_size+u],y[t*batch_size+u],batch_size*output_size_dense);
-                        t_update += duration_cast<nanoseconds>(steady_clock::now() - b_update).count();
-
                     }
-                    b_adam = steady_clock::now();
                     run_adam(beta1,beta2,LR);
-                    t_adam += duration_cast<nanoseconds>(steady_clock::now() - b_adam).count();
                 }
             }
             cout << "\n[done; cost = " << cost(x,y,sample_size) << "]" << endl;
@@ -602,30 +591,18 @@ class network{
             cout << "[training...]";
             double beta1, beta2;
             beta1 = adam_b1, beta2 = adam_b2;
-            b_mv = steady_clock::now();
             set_mv_to_zero();
-            t_mv += duration_cast<nanoseconds>(steady_clock::now() - b_mv).count();
 
             for(int ep=0;ep<epochs;ep++){
                 cout << " " << cost(x,y,sample_size) << ",";
                 cout.flush();
                 for(int t=0;t<sample_size/batch_size;t++){
-                    b_j = steady_clock::now();
                     set_j_to_zero();
-                    t_j += duration_cast<nanoseconds>(steady_clock::now() - b_j).count();
                     for(int u=0;u<batch_size;u++){
-                        b_forw = steady_clock::now();
                         forward(x[t*batch_size+u]);
-                        t_forw += duration_cast<nanoseconds>(steady_clock::now() - b_forw).count();
-                        b_update = steady_clock::now();
                         update_derivatives(x[t*batch_size+u],y[t*batch_size+u],batch_size*output_size_dense);
-                        t_update += duration_cast<nanoseconds>(steady_clock::now() - b_update).count();
-
                     }
-                    b_adam = steady_clock::now();
                     run_adam(beta1,beta2,LR);
-                    t_adam += duration_cast<nanoseconds>(steady_clock::now() - b_adam).count();
-
                 }
             }
             cout << "\n[done; cost = " << cost(x,y,sample_size) << "]\n";

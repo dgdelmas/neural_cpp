@@ -591,7 +591,7 @@ class network{
                     }
                     run_adam(beta1,beta2,LR);
                 }
-                if(prog_bar) progress_bar_after(ep,epochs+1,40);
+                if(prog_bar) {progress_bar_after(ep,epochs+1,40); cout.flush();}
             }
             cout << "\n[done; cost = " << cost(x,y,sample_size) << "]" << endl;
         }

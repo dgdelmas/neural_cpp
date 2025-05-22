@@ -36,6 +36,9 @@ int main(){
     }
     file.close();
 
+    cout << x[0][0][0][0] << endl;
+    cout.flush();
+
     int n_tr = 55000;
     double **** x_tr, **** x_te;
     double ** y_tr, ** y_te;

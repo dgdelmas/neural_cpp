@@ -574,6 +574,10 @@ class network{
             // TODO: option to shuffle mini batches
 
             if(sample_size % batch_size !=0) cerr << "warning, mini-batches don't fit!\n";
+
+            cout << "Training parameters:\n-Number of samples: " << sample_size << "\n-Size of mini-batch: " << batch_size << "\n-Learning rate: " << LR << "\n-Number of epochs: " << epochs << endl;
+
+
             cout << "[training; initial cost = " << cost(x,y,sample_size) << "]" << endl;
             double beta1, beta2;
             beta1 = adam_b1, beta2 = adam_b2;

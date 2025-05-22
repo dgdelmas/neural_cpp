@@ -574,7 +574,7 @@ class network{
             // TODO: option to shuffle mini batches
 
             if(sample_size % batch_size !=0) cerr << "warning, mini-batches don't fit!\n";
-            cout << "[training...]"; cout.flush();
+            cout << "[training...]\n"; cout.flush();
             double beta1, beta2;
             beta1 = adam_b1, beta2 = adam_b2;
             set_mv_to_zero(); // this and previous line: apparently, inside `ep` loop works better if `epochs` is small...
@@ -582,7 +582,7 @@ class network{
             for(int ep=0;ep<epochs;ep++){
                 //cout << " " << cost(x,y,sample_size) << ",";
                 //cout.flush();
-                if(prog_bar) progress_bar_before(ep,epochs,40);
+                if(prog_bar) progress_bar_before(ep,epochs+1,40);
                 for(int t=0;t<sample_size/batch_size;t++){
                     set_j_to_zero();
                     for(int u=0;u<batch_size;u++){
@@ -591,7 +591,7 @@ class network{
                     }
                     run_adam(beta1,beta2,LR);
                 }
-                if(prog_bar) progress_bar_after(ep,epochs,40);
+                if(prog_bar) progress_bar_after(ep,epochs+1,40);
             }
             cout << "\n[done; cost = " << cost(x,y,sample_size) << "]" << endl;
         }

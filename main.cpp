@@ -65,7 +65,7 @@ int main(){
     N.randomize();
     //N.read_from_file();
 
-    N.train(x, y, n_tr, 500, .02, 2);
+    N.train(x, y, n_tr, /*batch_size=*/500, /*learning_rate=*/.02, /*num_of_epochs=*/2);
     //N.print_to_file();
 
     double correct = 0, all = 0;
@@ -74,7 +74,7 @@ int main(){
         all++;
         N.forward(x_te[s]);
         for(int i=0;i<10;i++) max = N.arch[depth-1].p_d[i]>N.arch[depth-1].p_d[max] ? i:max;
-        correct += (y_te[s][max] == 1);
+        correct += y_te[s][max];
     }
     cout << "Accuracy: " << 100*correct/all << "%\n";
 

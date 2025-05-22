@@ -92,4 +92,9 @@ void progress_bar_after(int i, int epochs, int max_bar = 20){
     cout << "\b\b\b\b";
     for(int j=0;j<int(log10((epochs/max_bar) - (i/max_bar)))+3; j++) cout << "\b";
     for(int j=0;j<int(log10(epochs/max_bar))+1;j++) cout << "\b";
+    if(i == epochs-2){
+        cout << "[";
+        for(int j=0;j<min(epochs,max_bar)-1;j++) cout << "#";
+        cout << "]";
+    }
 }

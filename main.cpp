@@ -5,7 +5,7 @@
 #include <unistd.h>
 
 #include "header.h"
-#include "neural_new.h"
+#include "neural.h"
 
 int main(){
 

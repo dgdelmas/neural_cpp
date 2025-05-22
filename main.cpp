@@ -36,9 +36,6 @@ int main(){
     }
     file.close();
 
-    cout << x[0][0][0][0] << endl;
-    cout.flush();
-
     int n_tr = 55000;
     double **** x_tr, **** x_te;
     double ** y_tr, ** y_te;
@@ -78,11 +75,11 @@ int main(){
 
     network N({in_d,in_v,in_h},L,depth);
     N.loss_fnc = log_like;
-    //N.randomize();
-    N.read_from_file();
+    N.randomize();
+    //N.read_from_file();
 
     N.train(x_tr, y_tr, n_tr, 500, .02, 2);
-    N.print_to_file();
+    //N.print_to_file();
 
     double correct = 0, all = 0;
     int max = 0;

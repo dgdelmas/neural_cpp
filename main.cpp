@@ -9,7 +9,7 @@
 
 int main(){
 
-    int n_samp = 60000, in_d = 1, in_v = 28, in_h = 28;
+    int n_samp = 6000, in_d = 1, in_v = 28, in_h = 28;
 
     double **** x;
     x = new double***[n_samp];
@@ -36,7 +36,7 @@ int main(){
     }
     file.close();
 
-    int n_tr = 55000;
+    int n_tr = 5500;
     double **** x_te;
     double ** y_te;
     x_te = new double***[n_samp-n_tr]; y_te = new double*[n_samp-n_tr];
@@ -65,7 +65,7 @@ int main(){
     N.randomize();
     //N.read_from_file();
 
-    N.train(x, y, n_tr, /*batch_size=*/500, /*learning_rate=*/.02, /*num_of_epochs=*/2);
+    N.train(x, y, n_tr, /*batch_size=*/500, /*learning_rate=*/.02, /*num_of_epochs=*/10);
     //N.print_to_file();
 
     double correct = 0, all = 0;

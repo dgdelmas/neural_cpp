@@ -56,24 +56,25 @@ int main(){
     // cout << endl;
     //for(int i=0;i<10;i++) cout << y[30][i] << ",";
 
-    int depth = 5;
+    int depth = 6;
     layer L[depth];
-    L[0].set("conv",3); L[0].f_v = 3; L[0].f_h = 3;
-    L[1].set("conv",4); L[1].f_v = 6; L[1].f_h = 6; L[1].stride_h = 2; L[1].stride_v = 2;
+    L[0].set("conv",10); L[0].f_v = 3; L[0].f_h = 3;
+    L[1].set("conv",20); L[1].f_v = 5; L[1].f_h = 5; //L[1].stride_h = 2; L[1].stride_v = 2;
+    L[2].set("conv",30); L[1].f_v = 7; L[1].f_h = 7;
     //L[1].set("conv",6); L[1].f_v = 5; L[1].f_h = 5;
     //L[2].set("dense",10);
     //L[3].set("dense",10); L[3].activ = id;
     //L[4].set("softmax");
     //L[0].set("dense",10);
     //L[0].set("dense",60);
-    L[2].set("dense",30);
-    L[3].set("dense",10); L[3].activ = id;
-    L[4].set("softmax");
+    L[3].set("dense",30);
+    L[4].set("dense",10); L[4].activ = id;
+    L[5].set("softmax");
 
     network N({in_d,in_v,in_h},L,depth);
     N.loss_fnc = log_like;
-    //N.randomize();
-    N.read_from_file();
+    N.randomize();
+    //N.read_from_file();
 
     int n_tr = 28000;
     N.train(x, y, n_tr, /*batch_size=*/200, /*learning_rate=*/.01, /*num_of_epochs=*/6);

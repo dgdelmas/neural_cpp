@@ -20,7 +20,8 @@ int main(){
     y = new double*[n_samp];
     for(int i=0;i<n_samp;i++) y[i] = new double[10];
 
-    ifstream file1("myfile.txt");
+    ifstream file1("cifar10.txt");
+    assert(file1);
     string str;
     for(int line=0;line<n_samp;line++){
         for(int j=0;j<in_d;j++){
@@ -31,7 +32,8 @@ int main(){
         }
     }
     file1.close();
-    ifstream file2("myfile_label.txt");
+    ifstream file2("cifar10_y.txt");
+    assert(file2);
     for(int line=0;line<n_samp;line++){
         getline(file2, str, ',');
         for(int i=0;i<10;i++) y[line][i] = 0;

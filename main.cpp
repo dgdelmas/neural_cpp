@@ -9,7 +9,7 @@
 
 int main(){
 
-    int n_samp = 10000, in_d = 3, in_v = 32, in_h = 32;
+    int n_samp = 30000, in_d = 3, in_v = 32, in_h = 32;
 
     double **** x;
     x = new double***[n_samp];
@@ -72,11 +72,11 @@ int main(){
 
     network N({in_d,in_v,in_h},L,depth);
     N.loss_fnc = log_like;
-    N.randomize();
-    //N.read_from_file();
+    //N.randomize();
+    N.read_from_file();
 
-    int n_tr = 9000;
-    N.train(x, y, n_tr, /*batch_size=*/300, /*learning_rate=*/.01, /*num_of_epochs=*/6);
+    int n_tr = 28000;
+    N.train(x, y, n_tr, /*batch_size=*/200, /*learning_rate=*/.01, /*num_of_epochs=*/6);
     N.print_to_file();
 
     double correct = 0, all = 0;

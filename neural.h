@@ -577,8 +577,10 @@ class network{
 
             cout << "Training parameters:\n-Number of samples: " << sample_size << "\n-Size of mini-batch: " << batch_size << "\n-Learning rate: " << LR << "\n-Number of epochs: " << epochs << endl;
 
-
-            cout << "[training; initial cost = " << cost(x,y,sample_size) << "]" << endl;
+            double C;
+            cout << "[training; initial cost = ";
+            cout.flush();
+            cout << cost(x,y,sample_size) << "]" << endl;
             double beta1, beta2;
             beta1 = adam_b1, beta2 = adam_b2;
             set_mv_to_zero(); // this and previous line: apparently, inside `ep` loop works better if `epochs` is small...
@@ -587,21 +589,23 @@ class network{
                 //cout << " " << cost(x,y,sample_size) << ",";
                 //cout.flush();
                 //if(prog_bar) {progress_bar_before(ep,epochs+1,40); cout.flush();}
+                C = 0;
                 for(int t=0;t<sample_size/batch_size;t++){
-                    if(prog_bar) {progress_bar_before(t,sample_size/batch_size+1,40); cout.flush();}
+                    if(prog_bar) {progress_bar_before(t,sample_size/batch_size+1,80); cout.flush();}
                     set_j_to_zero();
                     for(int u=0;u<batch_size;u++){
                         forward(x[t*batch_size+u]);
                         update_derivatives(x[t*batch_size+u],y[t*batch_size+u],batch_size*output_size_dense);
+                        for(int a=0;a<output_size_dense;a++) C += loss_fnc.f(arch[depth-1+softmaxQ].p_d[a],y[t*batch_size+u][a])/(sample_size*output_size_dense);
                     }
                     run_adam(beta1,beta2,LR);
-                    if(prog_bar) progress_bar_after(t,sample_size/batch_size+1,40);
+                    if(prog_bar) progress_bar_after(t,sample_size/batch_size+1,80);
                 }
-                if(prog_bar) cout << " cost = " << cost(x,y,sample_size) << endl;
+                if(prog_bar) cout << " cost = " << C << endl;
 
                 //if(prog_bar) {progress_bar_after(ep,epochs+1,40); cout.flush();}
             }
-            cout << "\n[done; final cost = " << cost(x,y,sample_size) << "]" << endl;
+            cout << "[done; final cost = " << C << "]" << endl;
         }
 
         void train(double ** x, double ** y, int sample_size, int batch_size, double LR, int epochs){ // trains network, using rank-3 input
@@ -791,18 +795,19 @@ class network{
                     Xi_d[l][beta] = arch[l+num_of_conv].q_d[beta]*aux;
                 }
             }
-            for(int i=0;i<output_size_d;i++){
-                for(int j=0;j<output_size_v;j++){
-                    for(int k=0;k<output_size_h;k++){
-                        aux = 0;
-                        for(int beta=0;beta<arch[num_of_conv].n_out;beta++) aux += Xi_d[0][beta]*arch[num_of_conv].weights[beta][output_size_v*output_size_h*i+output_size_h*j+k];
-                        Xi_c[num_of_conv-1][i][j][k] = aux*arch[num_of_conv-1].q_c[i][j][k];
+            if(num_of_conv > 0){
+                for(int i=0;i<output_size_d;i++){
+                    for(int j=0;j<output_size_v;j++){
+                        for(int k=0;k<output_size_h;k++){
+                            aux = 0;
+                            for(int beta=0;beta<arch[num_of_conv].n_out;beta++) aux += Xi_d[0][beta]*arch[num_of_conv].weights[beta][output_size_v*output_size_h*i+output_size_h*j+k];
+                            Xi_c[num_of_conv-1][i][j][k] = aux*arch[num_of_conv-1].q_c[i][j][k];
+                        }
                     }
                 }
-            }
 
-            int minbb, maxbb, mincc, maxcc;
-            for(int l=num_of_conv-2;l>=0;l--){
+                int minbb, maxbb, mincc, maxcc;
+                for(int l=num_of_conv-2;l>=0;l--){
                     for(int j=0;j<arch[l].out_v;j++){
                         minbb = max(0,(j-arch[l+1].f_v+arch[l+1].stride_v)/arch[l+1].stride_v);
                         maxbb = min(j/arch[l+1].stride_v,arch[l+1].out_v-1);
@@ -820,6 +825,7 @@ class network{
                         }
                     }
                 }
+            }
 
 
 

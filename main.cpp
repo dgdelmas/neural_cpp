@@ -9,7 +9,7 @@
 
 int main(){
 
-    int n_samp = 30000, in_d = 3, in_v = 32, in_h = 32;
+    int n_samp = 20000, in_d = 3, in_v = 32, in_h = 32;
 
     double **** x;
     x = new double***[n_samp];
@@ -58,9 +58,9 @@ int main(){
 
     int depth = 5;
     layer L[depth];
-    L[0].set("conv",10); L[0].f_v = 3; L[0].f_h = 3;
-    L[1].set("conv",20); L[1].f_v = 5; L[1].f_h = 5; //L[1].stride_h = 2; L[1].stride_v = 2;
-    L[2].set("conv",30); L[1].f_v = 7; L[1].f_h = 7;
+    L[0].set("conv",8); L[0].f_v = 3; L[0].f_h = 3;
+    L[1].set("conv",16); L[1].f_v = 5; L[1].f_h = 5; //L[1].stride_h = 2; L[1].stride_v = 2;
+    L[2].set("conv",24); L[1].f_v = 7; L[1].f_h = 7;
     //L[1].set("conv",6); L[1].f_v = 5; L[1].f_h = 5;
     //L[2].set("dense",10);
     //L[3].set("dense",10); L[3].activ = id;
@@ -76,8 +76,8 @@ int main(){
     N.randomize();
     //N.read_from_file();
 
-    int n_tr = 28000;
-    N.train(x, y, n_tr, /*batch_size=*/200, /*learning_rate=*/.01, /*num_of_epochs=*/6);
+    int n_tr = 18000;
+    N.train(x, y, n_tr, /*batch_size=*/200, /*learning_rate=*/.001, /*num_of_epochs=*/3);
     N.print_to_file();
 
     double correct = 0, all = 0;

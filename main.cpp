@@ -60,7 +60,7 @@ int main(){
     layer L[depth];
     L[0].set("conv",8); L[0].f_v = 3; L[0].f_h = 3;
     L[1].set("conv",16); L[1].f_v = 5; L[1].f_h = 5; //L[1].stride_h = 2; L[1].stride_v = 2;
-    L[2].set("conv",24); L[1].f_v = 7; L[1].f_h = 7;
+    L[2].set("conv",24); L[2].f_v = 7; L[2].f_h = 7;
     //L[1].set("conv",6); L[1].f_v = 5; L[1].f_h = 5;
     //L[2].set("dense",10);
     //L[3].set("dense",10); L[3].activ = id;

@@ -578,9 +578,10 @@ class network{
             cout << "Training parameters:\n-Number of samples: " << sample_size << "\n-Size of mini-batch: " << batch_size << "\n-Learning rate: " << LR << "\n-Number of epochs: " << epochs << endl;
 
             double C;
-            cout << "[training; initial cost = ";
-            cout.flush();
-            cout << cost(x,y,sample_size) << "]" << endl;
+            //cout << "[training; initial cost = ";
+            //cout.flush();
+            //cout << cost(x,y,sample_size) << "]" << endl;
+            cout << "[training...]" << endl;
             double beta1, beta2;
             beta1 = adam_b1, beta2 = adam_b2;
             set_mv_to_zero(); // this and previous line: apparently, inside `ep` loop works better if `epochs` is small...

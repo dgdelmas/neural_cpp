@@ -73,11 +73,11 @@ int main(){
 
     network N({in_d,in_v,in_h},L,depth);
     N.loss_fnc = log_like;
-    N.randomize();
-    //N.read_from_file();
+    //N.randomize();
+    N.read_from_file();
 
     int n_tr = 18000;
-    N.train(x, y, n_tr, /*batch_size=*/200, /*learning_rate=*/.001, /*num_of_epochs=*/3);
+    N.train(x, y, n_tr, /*batch_size=*/400, /*learning_rate=*/.001, /*num_of_epochs=*/3);
     N.print_to_file();
 
     double correct = 0, all = 0;

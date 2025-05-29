@@ -1,5 +1,5 @@
 class layer{
-    /*Auiary class that encapsulates layers. For now, the only implemented types are "dense", "conv", and "softmax", for fully connected, convolutional, and
+    /*Auxiary class that encapsulates layers. For now, the only implemented types are "dense", "conv", and "softmax", for fully connected, convolutional, and
     softmax, respectively. Declare as `layer L{"dense",3};` for a three-neuron layer, as `layer L{"conv",4};` for a four-filter conv layer, and as `layer L{"softmax"}`;
     alternatively, use empty declaration `layer L;` and set type and size afterwards, via `L.set("dense",3);`.
 
@@ -284,7 +284,7 @@ class layer{
 class network{
     /*Class for neural network. For now, only supports convolutional and dense layers, as well as softmax. Fully connected network is fine, i.e., conv layers need not
     appear at all, but if they do, they can never postcede a dense one, and last layer must always be dense (or dense plus softmax). If last layer is softmax, it is
-    recommended to use `activ = id` (or `relu`) for the previous layer, so that the input to softmax is a logit instead of a probability.
+    recommended to use `activ = id` for the previous layer, so that the input to softmax is a logit instead of a probability.
 
     To do: option for maxpool, batch normalization, xavier-he initialization, etc.
 
@@ -577,7 +577,7 @@ class network{
 
             cout << "Training parameters:\n-Number of samples: " << sample_size << "\n-Size of mini-batch: " << batch_size << "\n-Learning rate: " << LR << "\n-Number of epochs: " << epochs << endl;
 
-            double C;
+            double C; // estimate of cost
             //cout << "[training; initial cost = ";
             //cout.flush();
             //cout << cost(x,y,sample_size) << "]" << endl;
@@ -609,30 +609,46 @@ class network{
             cout << "[done; final cost = " << C << "]" << endl;
         }
 
-        void train(double ** x, double ** y, int sample_size, int batch_size, double LR, int epochs){ // trains network, using rank-3 input
+        void train(double ** x, double ** y, int sample_size, int batch_size, double LR, int epochs, bool prog_bar = true){ // trains network, using rank-3 input
             if(num_of_conv != 0){
                 cerr << "Error: input to conv layer must be a rank-3 array.\n";
                 assert(false);
             }
-            if(sample_size % batch_size !=0) cout << "warning, batches don't fit!\n";
-            cout << "[training...]"; cout.flush();
+
+            if(sample_size % batch_size !=0) cerr << "warning, mini-batches don't fit!\n";
+
+            cout << "Training parameters:\n-Number of samples: " << sample_size << "\n-Size of mini-batch: " << batch_size << "\n-Learning rate: " << LR << "\n-Number of epochs: " << epochs << endl;
+
+            double C; // estimate of cost
+            //cout << "[training; initial cost = ";
+            //cout.flush();
+            //cout << cost(x,y,sample_size) << "]" << endl;
+            cout << "[training...]" << endl;
             double beta1, beta2;
             beta1 = adam_b1, beta2 = adam_b2;
-            set_mv_to_zero();
+            set_mv_to_zero(); // this and previous line: apparently, inside `ep` loop works better if `epochs` is small...
 
             for(int ep=0;ep<epochs;ep++){
                 //cout << " " << cost(x,y,sample_size) << ",";
                 //cout.flush();
+                //if(prog_bar) {progress_bar_before(ep,epochs+1,40); cout.flush();}
+                C = 0;
                 for(int t=0;t<sample_size/batch_size;t++){
+                    if(prog_bar) {progress_bar_before(t,sample_size/batch_size+1,80); cout.flush();}
                     set_j_to_zero();
                     for(int u=0;u<batch_size;u++){
                         forward(x[t*batch_size+u]);
                         update_derivatives(x[t*batch_size+u],y[t*batch_size+u],batch_size*output_size_dense);
+                        for(int a=0;a<output_size_dense;a++) C += loss_fnc.f(arch[depth-1+softmaxQ].p_d[a],y[t*batch_size+u][a])/(sample_size*output_size_dense);
                     }
                     run_adam(beta1,beta2,LR);
+                    if(prog_bar) progress_bar_after(t,sample_size/batch_size+1,80);
                 }
+                if(prog_bar) cout << " cost = " << C << endl;
+
+                //if(prog_bar) {progress_bar_after(ep,epochs+1,40); cout.flush();}
             }
-            cout << "\n[done; cost = " << cost(x,y,sample_size) << "]\n";
+            cout << "[done; final cost = " << C << "]" << endl;
         }
 
         void print_to_file(string filename = ""){ // prints weights and biases to textfile
@@ -641,6 +657,7 @@ class network{
             else name_of_file = filename;
             ofstream myfile;
             myfile.open(name_of_file);
+            assert(myfile);
 
             for(int l=0;l<num_of_conv;l++){
                 for(int i=0;i<arch[l].out_d;i++){
@@ -670,6 +687,7 @@ class network{
             else name_of_file = filename;
             ifstream myfile;
             myfile.open(name_of_file);
+            assert(myfile);
 
             for(int l=0;l<num_of_conv;l++){
                 for(int i=0;i<arch[l].out_d;i++){

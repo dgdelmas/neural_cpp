@@ -11,16 +11,16 @@ Example of usage:
 Say we want a network with five dense layers, with `32`, `16`, `8`, `4`, `2` neurons, respectively. First, we declare the layers as follows:
 
     int depth = 5; // number of layers
-    layer L[depth]; // array of neurons
+    layer L[depth]; // array of layers
     L[0].set("dense", 32); // first layer, with 32 neurons
     L[1].set("dense", 16); // second layer, with 16 neurons
-    L[2].set("dense", 8); // third layer, with 8 neurons
+    L[2].set("dense", 8);  // third layer, with 8 neurons
     L[3].set("dense", 4);  // fourth layer, with 4 neurons
     L[4].set("dense", 2);  // fifth layer, with 2 neurons
 
 The output to the network will be an array of length `2`; more generally, the output size is always equal to the number of neurons in the last layer.
 
-The default activation is a soft version of the sign function. We can choose other activations as well. For example, say we want the second layer to be a ReLu; then, we can redefine
+The default activation is a soft version of the sign function. We can choose other activations as well. For example, say we want the second layer to be a ReLU; then, we can redefine
 
     L[1].activ = relu;
 
@@ -48,10 +48,10 @@ The network is ready to use. For example, say we want to pass the input `x = {.1
 
 The activation of the `l`-th layer is accessed via `p_d[l]` (where `d` stands for "dense"; there is also `p_c[l]` for conv layers). For example, say we want the output of the second layer; this is done via
 
-    int scnd_lyr = 1; // layer we wish to look at
-    for(int i=0;i<N.arch[scnd_lyr].n_out;i++) cout << N.arch[scnd_lyr].p_d[i] << " ";
+    int l = 1; // layer we wish to look at
+    for(int i=0;i<N.arch[l].n_out;i++) cout << N.arch[l].p_d[i] << " ";
 
-This will print `16` floats to the console. Note that they are non-negative, since this layer is a ReLU. If we want the output of the last layer, we simply look at `L = depth-1`.
+This will print `16` floats to the console. Note that they are non-negative, since this layer is a ReLU. If we want the output of the last layer, we simply look at `l = depth-1`.
 
 Say that, instead, we have `6**5 = 7776` samples `(X,Y)` and we wish to train the network so that its output for a given `X` is as close as possible to the corresponding `Y`.
 Assume that "close" here means least squares (which is the default loss function). As before, `X` is 5-dimensional, and assume that `0 <= X[i] <= 1`.
@@ -98,7 +98,7 @@ The default filter size is `3x3`, with a stride of `1`. Say we want the second l
     int depth = 4; // number of layers
     layer L[depth];
     L[0].set("conv", 5); L[0].activ = relu; // first conv layer, with five filters
-    L[1].set("conv", 8); L[1].activ = relu; // second conv layer, with 8 filters
+    L[1].set("conv", 8); L[1].activ = relu; // second conv layer, with eight filters
     L[2].set("dense", 10); L[2].activ = id; // one dense layer, with 10 neurons
     L[3].set("softmax");                    // a softmax layer at the end
 
@@ -127,9 +127,9 @@ replace the loss function by cross-entropy instead of least squares:
 Next, we load the data. I have a csv file with `60000` lines, each of which contains, first, an integer from `0` to `9`, and then `28x28 = 784` integers from `0` to `255`.
 I load this data as follows:
 
-    int n_samp = 60000;
-    ifstream file("mnist.csv");
-    assert(file);
+    int n_samp = 60000; // number of samples in the mnist dataset
+    ifstream file("mnist.csv"); // change path to your local file
+    assert(file); // check that file loaded correctly
     string str;
     for(int line=0;line<n_samp;line++){
         getline(file, str, ',');
@@ -148,7 +148,7 @@ Let us use `n_tr = 58000` samples for training, and the remaining `n_samp - n_tr
 We can train as usual:
 
     int n_tr = 58000;
-    N.train(x, y, n_tr, /*batch_size=*/50, /*learning_rate=*/.02, /*num_of_epochs=*/2);
+    N.train(x, y, n_tr, /*batch_size=*/50, /*learning_rate=*/.01, /*num_of_epochs=*/2);
 
 We can finally test the model:
 
@@ -163,7 +163,7 @@ We can finally test the model:
     cout << "Accuracy: " << 100*correct/all << "%\n";
 
 
-This returns `96.75%` accuracy. Pretty decent.
+This returns `97.8%` accuracy. Pretty decent.
 
 
 

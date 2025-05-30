@@ -61,17 +61,19 @@ Then we can proceed as follows:
     int n_samp = 7776; // number of samples
     double ** X, ** Y;
     
-    X = new double*[n_samp];
-    Y = new double*[n_samp];
+    X = new double*[n_samp]; // declare predictor
+    Y = new double*[n_samp]; // declare response
     for(int i=0;i<n_samp;i++) X[i] = new double[n_in];
     for(int i=0;i<n_samp;i++) Y[i] = new double[2];
     
+    // uniform grid in [0,1]^5
     for(int i1=0;i1<6;i1++) for(int i2=0;i2<6;i2++) for(int i3=0;i3<6;i3++) for(int i4=0;i4<6;i4++) for(int i5=0;i5<6;i5++) X[i1+6*i2+36*i3+216*i4+1296*i5][0] = i1/5.;
     for(int i1=0;i1<6;i1++) for(int i2=0;i2<6;i2++) for(int i3=0;i3<6;i3++) for(int i4=0;i4<6;i4++) for(int i5=0;i5<6;i5++) X[i1+6*i2+36*i3+216*i4+1296*i5][1] = i2/5.;
     for(int i1=0;i1<6;i1++) for(int i2=0;i2<6;i2++) for(int i3=0;i3<6;i3++) for(int i4=0;i4<6;i4++) for(int i5=0;i5<6;i5++) X[i1+6*i2+36*i3+216*i4+1296*i5][2] = i3/5.;
     for(int i1=0;i1<6;i1++) for(int i2=0;i2<6;i2++) for(int i3=0;i3<6;i3++) for(int i4=0;i4<6;i4++) for(int i5=0;i5<6;i5++) X[i1+6*i2+36*i3+216*i4+1296*i5][3] = i4/5.;
     for(int i1=0;i1<6;i1++) for(int i2=0;i2<6;i2++) for(int i3=0;i3<6;i3++) for(int i4=0;i4<6;i4++) for(int i5=0;i5<6;i5++) X[i1+6*i2+36*i3+216*i4+1296*i5][4] = i5/5.;
 
+    // model to be learned
     for(int s=0;s<n_samp;s++) Y[s][0] = sin(X[s][0]+X[s][1]+X[s][2]+X[s][3]+X[s][4]);
     for(int s=0;s<n_samp;s++) Y[s][1] = 0.2*(cos(X[s][0]-X[s][1]+X[s][2]-X[s][3]+X[s][4])+X[s][2]-X[s][4]);
 
@@ -81,16 +83,17 @@ This will print the progress to the console; if we wish to suppress this we can 
 In any case, the final cost is around `10^-4`, which is roughly the average error for each sample. We can see that the model learned.
 To check this further, let us print the expected output for a few concrete samples, say, those in the range `[1000,1006)`, and the corresponding prediction:
 
-    for(int s=1000;s<1000+6;s++) cout << Y[s][0] << " ";
-    cout << endl << "vs" << endl;
+    // check that it worked
+    for(int s=1000;s<1000+6;s++) cout << "(" << Y[s][0] << "," << Y[s][1] << ") "; cout << endl;
+    cout << "vs" << endl;
 
     for(int s=1000;s<1000+6;s++){
         N.forward(X[s]);
-        cout << N.arch[depth-1].p_d[0] << " ";
+        cout << "(" << N.arch[depth-1].p_d[0] << "," << N.arch[depth-1].p_d[1] << ") ";
     }
     cout << endl;
 
-This prints `0.14112 -0.0583741 0.675463 0.515501 0.334988 0.14112` vs `0.133904 -0.0786117 0.675002 0.493398 0.320523 0.133001`. It is reasonably close.
+This prints `(0.14112,0.316013) (-0.0583741,0.32) (0.675463,0.192472) (0.515501,0.22806) (0.334988,0.259341) (0.14112,0.285067)` vs `(0.133904,0.298009) (-0.0786117,0.303425) (0.675002,0.206057) (0.493398,0.237544) (0.320523,0.26093) (0.133001,0.275874)`. It is reasonably close.
 
 Let us move on to convolutional networks. These follow the exact same rules as before. Say we want two conv layers, followed by a dense layer, and finally a soft-max layer.
 The default filter size is `3x3`, with a stride of `1`. Say we want the second layer to be `5x5` with a stride of `3`. Then, we can call
@@ -102,7 +105,7 @@ The default filter size is `3x3`, with a stride of `1`. Say we want the second l
     L[2].set("dense", 10); L[2].activ = id; // one dense layer, with 10 neurons
     L[3].set("softmax");                    // a softmax layer at the end
 
-    L[1].f_v = L[1].f_h = 5; // change filter size
+    L[1].f_v = L[1].f_h = 5; // change filter size (v = vertical, h = horizontal)
     L[1].stride_h = L[1].stride_v = 3; // change stride
 
 where we changed the activations into a pair of relu's and one identity.
@@ -119,13 +122,11 @@ As before, we can initialize the weights at random:
 
     N.randomize();
 
-Assume that we will use this network to identify hand written digits, say, from the MNIST dataset. Then, given that this is categorical data, it makes more sense to
-replace the loss function by cross-entropy instead of least squares:
+Assume that we will use this network to identify handwritten digits, say, from the MNIST dataset. Then, given that this is categorical data, it makes more sense to replace the loss function by cross-entropy instead of least squares:
 
     N.loss_fnc = log_like;
 
-Next, we load the data. I have a csv file with `60000` lines, each of which contains, first, an integer from `0` to `9`, and then `28x28 = 784` integers from `0` to `255`.
-I load this data as follows:
+Next, we load the data. I have a local csv file with `60000` lines, each of which contains, first, an integer from `0` to `9`, and then `28x28 = 784` integers from `0` to `255`. I load this data as follows:
 
     int n_samp = 60000; // number of samples in the mnist dataset
     ifstream file("mnist.csv"); // change path to your local file
@@ -144,8 +145,7 @@ I load this data as follows:
 
 Note that we are using a one-hot representation for `y`, where `y=(0,...,0,1,0,...,0)`.
 
-Let us use `n_tr = 58000` samples for training, and the remaining `n_samp - n_tr = 2000` for testing. Let us also use mini-batches of size `50`.
-We can train as usual:
+Let us use `n_tr = 58000` samples for training, and the remaining `n_samp - n_tr = 2000` for testing. Let us also use mini-batches of size `50`. We can train as usual:
 
     int n_tr = 58000;
     N.train(x, y, n_tr, /*batch_size=*/50, /*learning_rate=*/.01, /*num_of_epochs=*/2);
@@ -164,9 +164,3 @@ We can finally test the model:
 
 
 This returns `97.8%` accuracy. Pretty decent.
-
-
-
-
-
-

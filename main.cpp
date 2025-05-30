@@ -45,12 +45,12 @@ int main(){
     N.train(X, Y, n_samp, /*batch_size=*/n_samp, /*learning_rate=*/.02, /*num_of_epochs=*/500);
 
     // check that it worked
-    for(int s=1000;s<1000+6;s++) cout << Y[s][0] << " ";
-    cout << endl << "vs" << endl;
+    for(int s=1000;s<1000+6;s++) cout << "(" << Y[s][0] << "," << Y[s][1] << ") "; cout << endl;
+    cout << "vs" << endl;
 
     for(int s=1000;s<1000+6;s++){
         N.forward(X[s]);
-        cout << N.arch[depth-1].p_d[0] << " ";
+        cout << "(" << N.arch[depth-1].p_d[0] << "," << N.arch[depth-1].p_d[1] << ") ";
     }
     cout << endl;
 

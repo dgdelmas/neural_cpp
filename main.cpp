@@ -1,11 +1,11 @@
 #include <iostream>
 #include <fstream>
-#include <random>
+#include <cmath>
 #include <cassert>
-#include <unistd.h>
 
 #include "header.h"
 #include "neural.h"
+
 
 int main(){
     int depth = 5; // number of layers

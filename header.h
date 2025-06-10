@@ -98,3 +98,29 @@ void progress_bar_after(int i, int epochs, int max_bar = 20){
         cout << "]";
     }
 }
+
+bool softpad(int L, int l, int o, int & m, int & n){ // finds minimal m\in[0,l) such that L == n*l+m(2*l-m-1)-(n+2m)*o
+    for(m=0;m<l;m++){
+        n = L+m-2*l*m+m*m-o+2*m*o;
+        if( n % (l-o) == 0){
+            n /= l-o;
+            return true;
+        }
+    }
+    return false;
+}
+
+void softpad_range(int & start, int & end, int a, int l, int o, int m, int n){
+    if(a < m){
+        start = a*(l-m-o)+(a*(a-1))/2;
+        end = a*(l-m-o)+l-m+(a*(a+1))/2;
+    }
+    else if(a >= m && a < m + n ){
+        start = a*(l-o)-(m*(m+1))/2;
+        end = l+a*(l-o)-(m*(m+1))/2;
+    }
+    else{
+        start = a*(l+m+n-o)-m*(m+n)-(a*(a+1)+n*(n-1))/2;
+        end = a*(l+m+n-o)+l-1+o-m*(m+n-1)-(a*(a+3)+n*(n-3))/2;
+    }
+}

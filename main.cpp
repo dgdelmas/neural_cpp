@@ -63,7 +63,7 @@ int main(){
 
     clock_t start, end;
     start = clock();
-    N.train(x, y, n_tr, /*batch_size=*/250, /*learning_rate=*/.1, /*num_of_epochs=*/3);
+    N.train(x, y, n_tr, /*batch_size=*/250, /*learning_rate=*/.001, /*num_of_epochs=*/3);
     end = clock();
     cout << "Train time: " << double(end-start)/CLOCKS_PER_SEC << endl;
     N.print_to_file();

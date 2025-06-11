@@ -9,7 +9,7 @@
 
 
 int main(){
-    int n_samp = 20000, in_d = 3, in_v = 32, in_h = 32;
+    int n_samp = 30000, in_d = 3, in_v = 32, in_h = 32;
 
     double **** x;
     x = new double***[n_samp];
@@ -44,11 +44,11 @@ int main(){
 
     int depth = 7;
     layer L[depth];
-    L[0].set("conv",8); L[0].activ = relu;
+    L[0].set("conv",8);
     L[1].set("maxpool"); L[1].set_filter_size(2);
-    L[2].set("conv",12); L[2].activ = relu; L[2].set_filter_size(4);
+    L[2].set("conv",12); L[2].set_filter_size(4);
     L[3].set("maxpool"); L[3].set_filter_size(2);
-    L[4].set("conv",16); L[4].activ = relu; L[4].set_filter_size(5);
+    L[4].set("conv",16); L[4].set_filter_size(5);
     //L[5].set("dense",36); L[5].activ = relu;
     L[5].set("dense",10); L[5].activ = id;
     L[6].set("softmax");
@@ -58,12 +58,12 @@ int main(){
     //N.randomize();
     N.read_from_file();
 
-    int n_tr = 19000;
+    int n_tr = 29000;
 
 
     clock_t start, end;
     start = clock();
-    N.train(x, y, n_tr, /*batch_size=*/250, /*learning_rate=*/.001, /*num_of_epochs=*/3);
+    N.train(x, y, n_tr, /*batch_size=*/500, /*learning_rate=*/.01, /*num_of_epochs=*/5);
     end = clock();
     cout << "Train time: " << double(end-start)/CLOCKS_PER_SEC << endl;
     N.print_to_file();

@@ -44,12 +44,12 @@ int main(){
 
     int depth = 7;
     layer L[depth];
-    L[0].set("conv",8);
+    L[0].set("conv",15);
     L[1].set("maxpool"); L[1].set_filter_size(2);
-    L[2].set("conv",12); L[2].set_filter_size(4);
+    L[2].set("conv",20); L[2].set_filter_size(4);
     L[3].set("maxpool"); L[3].set_filter_size(2);
-    L[4].set("conv",16); L[4].set_filter_size(5);
-    //L[5].set("dense",36); L[5].activ = relu;
+    L[4].set("conv",25); L[4].set_filter_size(5);
+//    L[5].set("dense",36); // L[5].activ = relu;
     L[5].set("dense",10); L[5].activ = id;
     L[6].set("softmax");
 
@@ -63,7 +63,7 @@ int main(){
 
     clock_t start, end;
     start = clock();
-    N.train(x, y, n_tr, /*batch_size=*/500, /*learning_rate=*/.01, /*num_of_epochs=*/5);
+    N.train(x, y, n_tr, /*batch_size=*/1000, /*learning_rate=*/.1, /*num_of_epochs=*/3);
     end = clock();
     cout << "Train time: " << double(end-start)/CLOCKS_PER_SEC << endl;
     N.print_to_file();

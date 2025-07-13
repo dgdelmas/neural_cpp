@@ -15,6 +15,8 @@ The `network` class works with any subclass inherited from `layer`, as long as t
 
 ## Examples:
 
+### Fully connected
+
 Say we want a network that takes a `5`-dimensional array as input, and passes it through five dense layers, with `32`, `16`, `8`, `4`, `2` neurons, respectively. First, we declare the layers as follows:
 
     input i(5); // input layer, which specifies the size of the input
@@ -117,6 +119,8 @@ This prints `(0.334988,0.259341) (-0.0583741,0.344212) (-0.255541,0.196013) (0.1
 
 Note: the actual numbers you get might be different from mine, since your random number generator might produce different numbers from mine (it might be implementation dependent, although it actually shouldn't...)
 
+### Convolutional
+
 Let us move on to convolutional networks. These follow the exact same rules as before. As a concrete example, we will use the MNIST dataset, which consists of `60000` samples of `28x28` pixel images (one color channel, so grayscale) containing handwritten digits in the range `0-9` (so ten classes).
 
 We decide that we want two conv layers, followed by a dense layer, and finally a soft-max layer.
@@ -197,6 +201,8 @@ In any case, in just shy of a minute, training is done. We can test the result b
 
 
 This returns `94.6%` and `96.9` accuracy, respectively. Pretty decent.
+
+### A harder example
 
 Finally, we consider a more complicated example, the CIFAR10 dataset. This is famously a harder dataset, so we use more or less the same architecture, but we add a pooling layer in between the convolutional layers to speed up the process.
 

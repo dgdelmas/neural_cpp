@@ -1,1441 +1,972 @@
+#include "header.h"
+
+/*
+Base layer class, with default methods. You can create your own layer type by defining a subclass and overriding the various methods.
+The `network` class (see below) can take any layer type, as long as the various methods have been defined properly.
+
+All layers carry an activation function (although it is sometimes not used). The default activation is "soft sign", i.e., x/(1+|x|).
+Other options are `ReLU` (sigma(x) = max(0,x)), `id` (short for "identity", namely sigma(x) = x), `sigmoid` (sigma(x) = 1/(1+exp(x)).
+User-defined activations are allowed too, use the `activation_func` struct (see header file) to define other activations.
+
+The methods one can (and should) override are:
+++ print(bool,ostream). Prints layer details to stream (default = cout). The bool controls short vs long print, i.e., how much detail
+    we want to see.
+++ init(), only for the very first layer, i.e., an input layer. This initializes the layer, without using information from previous
+    layers (because there are none).
+++ init(int*,int), for the rest of layers. This initializes the layer, using information from the previous layer. The first argument
+    is a pointer to the `output_shape` of the previous layer, and the second argument is an integer equal to the `output_rank` of the
+    previous layer. For now, `output_rank` can only be 1,2,3, but it should be easy to rewrite the code if one needs higher rank tensors.
+    `output_shape` is an array of `output_rank` integers, specifying the dimensions of the tensor. For example, a 2x3x4 tensor has
+    `output_rank = 3`, `output_shape[0] = 2, output_shape[1] = 3, output_shape[2] = 4`.
+++ randomize(double). Randomizes all learnable parameters in the layer (some layer types have none), using the argument as, say,
+    the scale (e.g., the width of a uniform distribution, or of a gaussian, etc.)
+++ forward(double*). Performs a forward pass, taking as input the output of the previous layer.
+++ backward(double*). Performs a backward pass, taking as input the gradients of the following layer.
+++ zero_grad(). Sets all derivatives of the loss function with respect to all learnable parameters, to zero.
+++ update_derivatives(double*,double*). Adds to the current derivative of the loss function with respect to the learnable parameters
+    an update coming from a single sample. (So derivatives accumulate over a mini-batch, and we reset it to zero using `zero_grad` at the
+    end of the mini-batch). The first input to `update_derivatives` is a pointer to the output of the previous layer, and the second is a
+    poiter to the gradients of the following layer.
+
+Default attributes:
+++ input_rank and output_rank. The rank of the tensor that the layer takes as input and output, respectively. For now, only ranks 1,2,3
+    are implemented but it should be easy to generalize, should the need arise.
+++ input_size and output_size. The total dimension of the input and output (e.g., `input_size = input_shape[0]*input_shape[1]*input_shape[2]`)
+++ input_shape and output_shape. A list of integers that specify the dimensions of input and output tensors. For example, if the input
+    is a 2x3x4 tensor, then `input_shape[0] = 2, input_shape[1] = 3, input_shape[2] = 4`, and `input_size = 24`
+++ p. This is the output of the layer, a list of doubles of length `output_size`. Note that `p` is always a one-dimensional array, even
+    when the output is a higher-rank tensor (i.e., we always flatten all arrays and store them linearly).
+++ q. This is not always used. When `p = f(...)`, then `q` is defined as `q = f'(...)`, i.e., `q` is the derivative of the output with
+    respect to (typically) logits. Although not strictly necessary, storing this variable during the forward pass makes the backward
+    pass a little more efficient.
+++ theta. These are all the learnable parameters (some layer types have none). For example, a dense layer has weights and biases. We
+    flatten these and store them in the linear array `theta`.
+++ Z. These are the gradients, namely `Z[i] = d(loss)/dp[i]`.
+++ dL. These are the derivatives of the loss function with respect to the learnable parametres, `dL[i] = d(loss)/dtheta[i]`.
+++ n_param. This is the number of learnable parameters, i.e., the length of `theta` (of course also the length of `dL`).
+++ initQ. This is a bool that remembers whether the layer has been initialized (via the `init` method) or not. A layer cannot be used
+    before it has been initialized. (The `network` class runs `init` automatically so we never initialize layers by hand; this is just
+    a safety measure, it should never matter in practice unless someone does something we did not account for).
+*/
 class layer{
-    /*Auxiary class that encapsulates layers. For now, the only implemented types are "dense", "conv", and "softmax", for fully connected, convolutional, and
-    softmax, respectively. Declare as `layer L{"dense",3};` for a three-neuron layer, as `layer L{"conv",4};` for a four-filter conv layer, and as `layer L{"softmax"}`;
-    alternatively, use empty declaration `layer L;` and set type and size afterwards, via `L.set("dense",3);`.
+    friend class network;   // gathers a list of `layer`s together and defines various methods thereon
+    friend class optimizer; // trains a network using some form of gradient descent
+    friend class SGD;       // a specific optimizer that uses stochastic gradient descent
+    friend class Adam;      // another specific optimizer, this one using the Adam method
 
-    Note: maxpool layer is implemented as well, but not thoroughly tested yet, likely still buggy.
+public:
+    activation_func activ = softsign; // activation function (default = softsign(x) = x/(1+|x|))
+    virtual int print(bool, ostream & os = cout){
+        os << "default print(bool,ostream)." << endl;
+        return 0;
+    }
+    virtual ~layer(){}
 
-    The default activation is `softsign`, i.e., x/(1+abs(x)), other predefined options are `relu` and `sigmoid`, while user-defined activations are allowed,
-    handled via the `activation` struct defined in `header.h`. For a softmax layer, the activation is irrelevant.
+protected:
+    virtual void init(){
+        cout << "default init()." << endl;
+    }
+    virtual void init(int*,int){
+        cout << "default init(int*,int)." << endl;
+    }
+    virtual void randomize(double){
+        cout << "default randomize(double)." << endl;
+    }
+    virtual void forward(double*){
+        cout << "default forward(double*)." << endl;
+    }
+    virtual void backward(){} // should this be removed?
+    virtual void backward(double*){}
 
-    Other parameters are: `n_in` and `n_out` for dense layers, corresponding to the size of the input and output, respectively; `inp_d`, `inp_v`, `inp_h` for
-    conv layers, corresponding to the depth/vertical size/horizontal size of the input, respectively, and `out_d`, `out_v`, `out_h` for the same parameters in the
-    output; `stride_v` and `stride_h` for the stride of conv layers and `f_v`, `f_h` for the vertical and horizontal size of the filter. For softmax, `n_out == `n_in`.
-    The default filter size for conv layers is `f_v = f_h = 3`, and the default stride is `stride_v = stride_h = 1`.
+    virtual void zero_grad(){
+        cout << "default zero_grad()." << endl;
+    }
+    virtual void update_derivatives(double*,double*){
+        cout << "defaul update_derivatives(double*,double*)." << endl;
+    }
 
-    Before a layer can be used for anything, one must run `L.initialize()`, which reserves memory for the weights and biases, and other variables that the layer
-    requires. Note: the `network` class automatically initializes its layers, so no need to do this manually if the layer is going to be used by a network.
+    int input_rank = -1, output_rank = -1, input_size = -1, output_size = -1;
+    int * input_shape, * output_shape;
+    double * p, * q, * theta; // output, output', learnable parameters
+    double * Z; // d(loss)/dp
+    double * dL; // d(loss)/d(theta)
+    int n_param = 0; // length of theta == length of dL == number of learnable parameters
+    bool initQ = false;
+};
 
-    Use `L.randomize(s)` to set weights and biases to random values, taken from a uniform distribution from `-s` to `+s`. Default `s` is 1.
 
-    Use `L.forward(x)` to run a forward pass with input `x`. This computes `p` and `q`, where `p := activation(weights . x + bias)` and `q := activation'(weights . x + bias)`.
+/*
+Here we define our first layer type, an input layer. This  takes an array and passes it to the first actual layer in the network. The
+main purpose of this layer is to specify the size of the input tensor, it doesn't do much more. The size of a rank-3 array is specified
+in the following order: (depth, vertical size, horizontal size).
 
-    Finally, use `<<` to print layer details to a stream, e.g. `cout << L;`.
-    */
+Declare as
+    input i(3);
+for an input layer that takes a one-dimensional array of length 3, or as
+    input i(4,5);
+for an input layer that takes a two-dimensional array of length 4x5, or as
+    input i(6,7,8);
+for three-dimensional arrays. We do not allow for higher-dimensional arrays but it is easy to rewrite the code if such arrays turn out
+to be useful for some applications. Note: input(1,3,3) and input(3,3) are essentially identical: all rank-2 arrays are secretly treated
+as rank-3 internally, just with length-1 depth.
+*/
+class input: public layer{
+public:
+    input(int n){
+        assert(n >= 1);
+        output_rank = 1;
+        output_shape = new int[3];
+        output_shape[0] = n;
+        output_shape[1] = 1;
+        output_shape[2] = 1;
+        output_size = n;
+    }
+    input(int n_v, int n_h){
+        assert(n_v >=1 && n_h >= 1);
+        output_rank = 3;
+        output_shape = new int[3];
+        output_shape[0] = 1;
+        output_shape[1] = n_v;
+        output_shape[2] = n_h;
+        output_size = n_v*n_h;
+    }
+    input(int n_d, int n_v, int n_h){
+        assert(n_d >= 1 && n_v >=1 && n_h >= 1);
+        output_rank = 3;
+        output_shape = new int[3];
+        output_shape[0] = n_d;
+        output_shape[1] = n_v;
+        output_shape[2] = n_h;
+        output_size = n_d*n_v*n_h;
+    }
 
-    //TODO: short print (weights: {0.2312312, ... , 1.23212})
-    //TODO: add option to freeze layer
-    public:
-        activation activ = softsign; // default = x/(1+abs(x))
-        bool frozenQ = false;
+    int print(bool longQ = false, ostream & os = cout) override {
+        assert(initQ);
+        os << "input layer, size: ";
+        if(output_rank == 1) os << output_shape[0] << endl;
+        else os << output_shape[0] << "x" << output_shape[1] << "x" << output_shape[2] << endl;
+        return 0;
+    }
+    ~input() override{
+        delete[] output_shape;
+    }
 
-        double **** filter; // for conv
-        double ** weights; // for dense
-        double * biases;   // for conv and dense
+protected:
+    void init() override {
+        assert(!initQ);
+        initQ = true;
+    }
+    void forward(double * x) override {
+        p = x;
+    }
+};
 
-        double * p_d; // p := activation(wx+b), for dense
-        double * q_d; // q := activation'(wx+b), for dense
-        double *** p_c; // p := activation(fx+b), for conv
-        double *** q_c; // q := activation'(fx+b), for conv
-        int *** mp_v, *** mp_h; // for maxpool; p[i][j][k] =: x[i][mp_v[i][j][k]][mp_h[i][j][k]]
 
-        //Note: might want to unify d's and c's into a single object, by flattening the various arrays into 1-dimensional ones. Leave this for the future...
-        friend class network;
 
-        int get_numb_of_inp_neurons(); // returns size of input for a dense layer
-        int get_numb_of_out_neurons(); // returns size of output for a dense layer
-        int get_numb_of_inp_channels(); // returns depth of input for a conv layer (depth = number of channels)
-        int get_numb_of_out_channels(); // returns depth of output for a conv layer (depth = number of channels)
-        int get_inp_im_size(char); // returns height and width of input for a conv layer
-        int get_out_im_size(char);  // returns height and width of output for a conv layer
-        void set_pool_overlap(int, int); // whether pools overlap when maxpooling; default = no overlap
-        void set_pool_overlap(int); // ov = oh
-        void set_filter_size(int,int); // sets height and width of filter for a conv layer
-        void set_filter_size(int); // f_h = f_v
-        int get_filter_size(char); // returns height and width of filter for a conv layer (if equal)
-        void set_stride(int, int); // sets vertical and horizontal stride for a conv layer
-        void set_stride(int); // s_h = s_v
-        int get_stride(char); // returns vertical and horizontal stride for a conv layer (if equal)
-        string get_type(); // returns layer type
+/*
+Our next layer type is a dense layer, namely a fully connected, all-to-all layer.
 
-        layer(){}
-        layer(string tp){
-            set(tp);
+Although in principle one could feed a dense layer into a convolutional one, there is no canonical way of doing so, since a dense layer
+is always rank-1. We could simply declare by hand that this one-dimensional array should be reshaped into a higher-dimensional one, but
+this is not a very natural operation. For now, I do not allow for this, but it should be easy to define a `reshape` layer that does this
+for us should the need arise.
+
+Declare as
+    dense(4);
+for a dense layer with 4 neurons.
+
+We override all the default methods in the `layer` class so that, for example, the forward pass takes the usual form `p = sigma(w.x+b)`.
+The weights and biases are stored as `w[i][j] = theta[input_size*i + j]` and `b[i] = theta[input_size*output_size + i]`.
+*/
+class dense: public layer{
+public:
+    dense(int n){
+        assert(n >= 1);
+        output_rank = 1;
+        output_shape = new int[1];
+        output_shape[0] = n;
+        output_size = n;
+    }
+    int print(bool longQ = false, ostream & os = cout) override {
+        assert(initQ);
+        os << "dense layer, input size: " << input_size << ", output size: " << output_size << endl;
+        if(longQ){
+            if(activ.name.size() > 0) os << "activation function: " << activ.name << endl;
+            os << "weights:\n";
+            full_print(theta,output_size,input_size,os);
+            os << "\nbiases:\n";
+            full_print(theta+input_size*output_size,output_size,os);
+            os << "\nnumber of parameters: " << n_param << endl;
         }
-        layer(string tp, int d){
-            set(tp,d);
+        else{
+            os << "weights:\n";
+            short_print(theta,output_size,input_size,os);
+            os << "\nbiases:\n";
+            short_print(theta+input_size*output_size,output_size,os);
+            os << endl;
         }
-        void set(string tp){ // sets type of layer
-            assert(tp == "softmax" || tp == "maxpool");
-            type = tp;
+        return n_param;
+    }
+
+    ~dense() override {
+        delete[] output_shape;
+        if(initQ){
+            delete[] p;
+            delete[] q;
+            delete[] theta;
+            delete[] Z;
+            delete[] dL;
         }
-        void set(string tp, int d){ // sets type of layer
-            if(tp == "dense"){
-                if(d <= 0) cerr << "Number of neurons must be positive!\n";
-                assert(d > 0);
-                n_out = d;
-            }
-            else if(tp == "conv"){
-                if(d <= 0) cerr << "Filter size must be positive!\n";
-                assert(d > 0);
-                out_d = d;
-            }
-            //else if(tp == "softmax"){
-            //    if(d <= 0) cerr << "Number of inputs/outputs must be positive!\n";
-            //    assert(d > 0);
-            //    n_out = d;
-            //}
-            //else if(tp == "maxpool"){
-            //    if(d <= 0) cerr << "Number of channels must be positive!\n";
-            //    assert(d > 0);
-            //    out_d = d;
-            //}
-            else{
-                cerr << "Unsupported layer type.\n";
-                assert(false);
-            }
-            type = tp;
+    }
+protected:
+    void init(int * prev_shape, int prev_rank) override {
+        assert(!initQ);
+        input_size = 1;
+        for(int i=0;i<prev_rank;i++) input_size *= prev_shape[i];
+        p = new double[output_size];
+        q = new double[output_size];
+        n_param = input_size*output_size + output_size;
+        theta = new double[n_param];
+        dL = new double[n_param];
+        Z = new double[input_size];
+        initQ = true;
+    }
+    void randomize(double scale = 1.) override {
+        assert(initQ);
+        for(int i=0;i<output_size;i++){
+            theta[input_size*output_size+i] = 0.1*rand_U(scale);
+            for(int j=0;j<input_size;j++) theta[input_size*i+j] = rand_U(scale);
         }
-
-        void initialize(){ // checks that parameters make sense and, if so, reserves memory for weights and biases. (Also, sets `initializedQ` to `true`)
-            if(!(type == "dense" || type == "conv" || type == "softmax" || type == "maxpool")){
-                cerr << "Unknown layer type!\n";
-                assert(type == "dense" || type == "conv" || type == "softmax" || type == "maxpool");
-            }
-            if(type == "dense"){
-                if(n_out <= 0 || n_in <= 0){
-                    cerr << "Input/output size to dense layer must be a positive integer!\n";
-                    assert(n_in > 0 && n_out > 0);
-                }
-                weights = new double*[n_out];
-                biases = new double[n_out];
-                for(int i=0;i<n_out;i++) weights[i] = new double[n_in];
-                p_d = new double[n_out];
-                q_d = new double[n_out];
-            }
-            else if(type == "conv"){
-                if(inp_h <= 0 || inp_v <= 0 || inp_d <=0 || out_d <=0){
-                    cerr << "Input/output size to conv layer must be a positive integer!\n";
-                    assert(inp_h > 0 && inp_v > 0 && inp_d > 0 && out_d > 0);
-                }
-                if(f_h <=0 || f_v <=0 || stride_h < 1 || stride_v < 1){
-                    cerr << "Filter size and stride must be positive integers!\n";
-                    assert(f_h > 0 && f_v > 0 && stride_h >= 1 && stride_v >= 1);
-                }
-                if( (inp_v-f_v) % stride_v !=0 || (inp_h-f_h) % stride_h !=0){
-                    cerr << "Stride doesn't fit! No padding allowed...\n";
-                    assert(( (inp_v-f_v) % stride_v == 0 && (inp_h-f_h) % stride_h == 0));
-                }
-                if( f_v > inp_v || f_h > inp_h){
-                    cerr << "filter too large or input too small!\n";
-                    assert( f_v <= inp_v && f_h <= inp_h);
-                }
-
-                out_v = (inp_v-f_v)/stride_v + 1;
-                out_h = (inp_h-f_h)/stride_h + 1;
-
-                if(out_v <= 0 || out_h <= 0) cerr << "filter don't fit!\n";
-                assert(out_v > 0 && out_h > 0);
-
-                biases = new double[out_d];
-
-                filter = new double***[out_d];
-                for(int i=0;i<out_d;i++) filter[i] = new double**[inp_d];
-                for(int i=0;i<out_d;i++) for(int j=0;j<inp_d;j++) filter[i][j] = new double*[f_v];
-                for(int i=0;i<out_d;i++) for(int j=0;j<inp_d;j++) for(int k=0;k<f_v;k++) filter[i][j][k] = new double[f_h];
-
-                p_c = new double**[out_d];
-                for(int i=0;i<out_d;i++) p_c[i] = new double*[out_v];
-                for(int i=0;i<out_d;i++) for(int j=0;j<out_v;j++) p_c[i][j] = new double[out_h];
-
-                q_c = new double**[out_d];
-                for(int i=0;i<out_d;i++) q_c[i] = new double*[out_v];
-                for(int i=0;i<out_d;i++) for(int j=0;j<out_v;j++) q_c[i][j] = new double[out_h];
-            }
-            else if(type == "maxpool"){
-                if(inp_h <= 0 || inp_v <= 0 || inp_d <=0 || out_d <=0){
-                    cerr << "Input/output size to maxpool layer must be a positive integer!\n";
-                    assert(inp_h > 0 && inp_v > 0 && inp_d > 0 && out_d > 0);
-                }
-                if(f_h <=0 || f_v <=0 || stride_h < 1 || stride_v < 1){
-                    cerr << "Filter size and stride must be positive integers!\n";
-                    assert(f_h > 0 && f_v > 0 && stride_h >= 1 && stride_v >= 1);
-                }
-
-                assert(softpad(inp_v, f_v, overlap_v, mp_m_v, mp_n_v));
-                assert(softpad(inp_h, f_h, overlap_h, mp_m_h, mp_n_h));
-                assert(mp_n_v > 0 && mp_n_h > 0);
-                assert(overlap_v < f_v - mp_m_v && overlap_h < f_h - mp_m_h); // maybe <= ?
-
-                out_v = 2*mp_m_v+mp_n_v;
-                out_h = 2*mp_m_h+mp_n_h;
-
-                //cout << inp_d << " " << inp_v << " " << inp_h << " " << out_d << " " << out_v << " " << out_h << endl;
-
-                p_c = new double**[out_d];
-                for(int i=0;i<out_d;i++) p_c[i] = new double*[out_v];
-                for(int i=0;i<out_d;i++) for(int j=0;j<out_v;j++) p_c[i][j] = new double[out_h];
-
-                mp_v = new int**[out_d];
-                for(int i=0;i<out_d;i++) mp_v[i] = new int*[out_v];
-                for(int i=0;i<out_d;i++) for(int j=0;j<out_v;j++) mp_v[i][j] = new int[out_h];
-
-                mp_h = new int**[out_d];
-                for(int i=0;i<out_d;i++) mp_h[i] = new int*[out_v];
-                for(int i=0;i<out_d;i++) for(int j=0;j<out_v;j++) mp_h[i][j] = new int[out_h];
-
-
-            }
-            else if(type == "softmax"){
-                p_d = new double[n_out];
-            }
-            else cerr << "Unclear instructions...\n";
-
-
-            if(type == "softmax" || type == "maxpool") frozenQ = true;
-            initializedQ = true;
-
+    }
+    void forward(double * x) override {
+        for(int i=0;i<output_size;i++){
+            double aux = 0.;
+            for(int j=0;j<input_size;j++) aux += theta[input_size*i + j]*x[j];
+            aux += theta[input_size*output_size + i];
+            p[i] = activ.f(aux);
+            q[i] = activ.df(aux);
         }
-        ~layer(){ // if layer has been initialized, frees reserved memory.
-            if(initializedQ){
-                if(type == "dense"){
-                    for(int i=0;i<n_out;i++) delete[] weights[i];   
-                    delete[] weights;
-                    delete[] biases;
-                    delete[] p_d;
-                    delete[] q_d;
+    }
+
+    void backward(double * x) override {
+        for(int i=0;i<input_size;i++){
+            double aux = 0.;
+            for(int j=0;j<output_size;j++) aux += x[j]*q[j]*theta[input_size*j + i];
+            Z[i] = aux;
+        }
+    }
+
+    void zero_grad() override {
+        for(int i=0;i<n_param;i++) dL[i] = 0.;
+    }
+
+    void update_derivatives(double * x, double * z) override {
+        for(int a=0;a<input_size*output_size;a++){
+            double aux = 0.;
+            int min_i = max(0,a/input_size);
+            int max_i = min(1+a/input_size,input_size);
+            for(int i=min_i;i<max_i;i++) aux += z[i]*q[i]*x[a-input_size*i];
+            dL[a] += aux;
+        }
+        for(int i=0;i<output_size;i++){
+            dL[input_size*output_size+i] += z[i]*q[i];
+        }
+    }
+};
+
+/*
+We now define a (2d) convolutional layer.
+
+Declare as
+    conv(4);
+for a convolutional layer with 4 filters. This uses the default filter size `(f_v,f_h) = (3,3)` and default stride `(s_v,s_h) = (1,1)`.
+A different filter size can be declared as
+    conv(4,5,6);
+for 4 filters of size 5x6, or as
+    conv(4,5,6,2,3);
+for 4 filters of size 5x6 and stride 2x3. Note: we do not allow for padding so the stride should fit the input properly. If padding is
+required, one should define a `padding` layer type that simply resizes its input into the proper size, and does nothing else.
+
+We override all the default methods in the `layer` class so that, for example, the forward pass takes the usual form `p = sigma(w*x+b)`.
+Note that the weights are a rank-4 array of size `o_d x i_d x f_v x f_h`, where `(o_d,o_v,o_h)` are the dimensions of the output tensor,
+`(i_d,i_v,i_h)` are the dimensions of the input tensor. The weights and biases are stored as
+`w[i][j][k][l] = theta[i_d*f_v*f_h*i + f_v*f_h*j + f_h*k + l]` and `b[i] = theta[o_d*i_d*f_v*f_h + i]`.
+*/
+class conv: public layer{
+//TODO: Z is sparse...
+public:
+    conv(int n){
+        assert(n >= 1);
+        input_rank = output_rank = 3;
+        input_shape = new int[3];
+        output_shape = new int[3];
+        output_shape[0] = n;
+        f_v = 3;
+        f_h = 3;
+        s_v = 1;
+        s_h = 1;
+    }
+    conv(int n, int fv, int fh, int sv = 1, int sh = 1){
+        assert(n >= 1 && fv >= 1 && fh >= 1 && sv >= 1 && sh >= 1);
+        input_rank = output_rank = 3;
+        input_shape = new int[3];
+        output_shape = new int[3];
+        output_shape[0] = n;
+        f_v = fv;
+        f_h = fh;
+        s_v = sv;
+        s_h = sh;
+    }
+
+    int print(bool longQ = false, ostream & os = cout) override {
+        assert(initQ);
+        int i_d = input_shape[0], i_v = input_shape[1], i_h = input_shape[2],
+            o_d = output_shape[0], o_v = output_shape[1], o_h = output_shape[2];
+        os << "conv layer, input size: " << i_d << "x" << i_v << "x" << i_h
+           << ", output size: " << o_d << "x" << o_v << "x" << o_h << endl;
+        if(longQ){
+            if(activ.name.size() > 0) os << "activation function: " << activ.name << endl;
+            for(int i=0;i<o_d;i++){
+                switch(i){
+                case 0: os << "first kernel-\n"; break;
+                case 1: os << "second kernel-\n"; break;
+                case 2: os << "third kernel-\n"; break;
+                default: os << i+1 << "th kernel-\n";
                 }
-                else if(type == "conv"){
-                    delete[] biases;
-                    for(int i=0;i<out_d;i++) for(int j=0;j<inp_d;j++) for(int k=0;k<f_v;k++) delete[] filter[i][j][k];
-                    for(int i=0;i<out_d;i++) for(int j=0;j<inp_d;j++) delete[] filter[i][j];
-                    for(int i=0;i<out_d;i++) delete[] filter[i];
-                    delete[] filter;
-                    for(int i=0;i<out_d;i++) for(int j=0;j<out_v;j++) delete[] p_c[i][j];
-                    for(int i=0;i<out_d;i++) delete[] p_c[i];
-                    delete[] p_c;
-                    for(int i=0;i<out_d;i++) for(int j=0;j<out_v;j++) delete[] q_c[i][j];
-                    for(int i=0;i<out_d;i++) delete[] q_c[i];
-                    delete[] q_c;
+
+                os << "weights:\n";
+                full_print(theta,i_d,f_v,f_h,os);
+                os << "\nbias: " << theta[o_d*i_d*f_v*f_h + i] << (i<o_d-1 ? "\n\n" : "\n");
+            }
+            if(s_v != 1 || s_h != 1){
+                if(s_v == s_h) os << "(Stride: " << s_h << ")\n";
+                else os << "(Vertical stride: " << s_v << ", Horizontal stride: " << s_h << ")\n";
+            }
+            os << "\nnumber of parameters: " << n_param << endl;
+        }
+        else{
+            for(int i=0;i<o_d;i++){
+                if(i == 0 || i == o_d-1){
+                    if(i == 0) os << "first kernel-\n";
+                    if(i == o_d-1) os << o_d << "th kernel-\n";
+                    os << "weights:\n";
+                    short_print(theta,i_d,f_v,f_h,os);
+                    os << "\nbias: " << theta[o_d*i_d*f_v*f_h + i] << (i<o_d-1 ? "\n\n" : "\n");
                 }
-                else if(type == "softmax") delete[] p_d;
-                else if(type == "maxpool"){
-                    for(int i=0;i<out_d;i++) for(int j=0;j<out_v;j++) delete[] p_c[i][j];
-                    for(int i=0;i<out_d;i++) delete[] p_c[i];
-                    delete[] p_c;
-                    for(int i=0;i<out_d;i++) for(int j=0;j<out_v;j++) delete[] mp_v[i][j];
-                    for(int i=0;i<out_d;i++) delete[] mp_v[i];
-                    delete[] mp_v;
-                    for(int i=0;i<out_d;i++) for(int j=0;j<out_v;j++) delete[] mp_h[i][j];
-                    for(int i=0;i<out_d;i++) delete[] mp_h[i];
-                    delete[] mp_h;
+                else{
+                    os << "..." << endl;
                 }
-                else cerr << "1. unknown error...\n";
-                //initializedQ = false;
+            }
+            if(s_v != 1 || s_h != 1){
+                if(s_v == s_h) os << "(Stride: " << s_h << ")\n";
+                else os << "(Vertical stride: " << s_v << ", Horizontal stride: " << s_h << ")\n";
             }
         }
+        return n_param;
+    }
 
-        void randomize(double scale = 1){
-            if(!initializedQ){
-                cerr << "Layer not initialized!\n";
-                assert(initializedQ);
-            }
-            if(!frozenQ && type == "dense"){
-                for(int i=0;i<n_out;i++){
-                    biases[i] = 0.1*rand_U(scale);
-                    for(int j=0;j<n_in;j++) weights[i][j] = rand_U(scale);
-                }
-            }
-            else if(!frozenQ && type == "conv"){
-                for(int i=0;i<out_d;i++) for(int j=0;j<inp_d;j++) for(int k=0;k<f_v;k++) for(int l=0;l<f_h;l++) filter[i][j][k][l] = rand_U(scale);
-                for(int i=0;i<out_d;i++) biases[i] = rand_U(0.1*scale);
-            }
-//            else if(type == "softmax"){
-//                cerr << "Warning: nothing to randomize in a softmax layer...\n";
-//            }
-//            else if(type == "maxpool"){
-//                cerr << "Warning: nothing to randomize in a softmax layer...\n";
-//            }
-//            else cerr << "2. unknown error...\n";
+    ~conv() override {
+        delete[] input_shape;
+        delete[] output_shape;
+        if(initQ){
+            delete[] p;
+            delete[] q;
+            delete[] theta;
+            delete[] Z;
+            delete[] dL;
         }
-        void forward(double * input){ // rank-1 input, for dense layers only
-            double aux;
-            if(type == "dense"){
-                for(int i=0;i<n_out;i++){
-                    aux = 0;
-                    for(int j=0;j<n_in;j++) aux += weights[i][j]*input[j];
-                    aux += biases[i];
-                    p_d[i] = activ.f(aux);
-                    q_d[i] = activ.df(aux);
+    }
 
-                }
-            }
-            else if(type == "softmax"){
-                for(int i=0;i<n_out;i++) p_d[i] = exp(input[i]);
-                aux = 0;
-                for(int i=0;i<n_out;i++) aux += p_d[i];
-                for(int i=0;i<n_out;i++) p_d[i] /= aux;
-            }
-            else if(type == "conv"){
-                cerr << "Input to conv layer must be rank-3!\n";
-                assert(false);
-            }
-            else if(type == "maxpool"){
-                cerr << "Input to maxpool layer must be rank-3!\n";
-                assert(false);
-            }
-            else cerr << "3. unknown error...\n";
+    // conv * set_filter_size(int n){
+    //     assert(n >= 1);
+    //     f_v = f_h = n;
+    //     return this;
+    // }
+    // conv * set_filter_size(int n_v, int n_h){
+    //     assert(n_v >= 1 && n_h >= 1);
+    //     f_v = n_v;
+    //     f_h = n_h;
+    //     return this;
+    // }
+protected:
+    void init(int * prev_shape, int prev_rank) override {
+        assert(!initQ);
+        assert(prev_rank == 3);
+        input_shape[0] = prev_shape[0];
+        input_shape[1] = prev_shape[1];
+        input_shape[2] = prev_shape[2];
+        input_size = input_shape[0]*input_shape[1]*input_shape[2];
+        if( (input_shape[1]-f_v) % s_v != 0 || (input_shape[2]-f_h) % s_h != 0){
+            cerr << "stride doesn't fit, no padding allowed.\n";
+            assert((input_shape[1]-f_v) % s_v != 0);
+            assert((input_shape[2]-f_h) % s_h != 0);
         }
-        void forward(double ** input){ // rank-3 input, for conv layers only, depth = 1
-            double aux;
-            assert(inp_d == 1);
-            if(type == "conv"){
-                for(int a=0;a<out_d;a++){
-                    for(int b=0;b<out_v;b++){
-                        for(int c=0;c<out_h;c++){
-                            aux = 0;
-                            for(int j=0;j<f_v;j++) for(int k=0;k<f_h;k++) aux += filter[a][0][j][k]*input[j+b*stride_v][k+c*stride_h];
-                            aux += biases[a];
-                            p_c[a][b][c] = activ.f(aux);
-                            q_c[a][b][c] = activ.df(aux);
-                        }
-                    }
-                }
-            }
-            else if(type == "maxpool"){
-                int j_start, j_end, k_start, k_end;
-                assert(inp_d == 1 && out_d == 1);
-                for(int b=0;b<out_v;b++){
-                    softpad_range(j_start,j_end,b,f_v,overlap_v,mp_m_v,mp_n_v);
-                    for(int c=0;c<out_h;c++){
-                        softpad_range(k_start,k_end,c,f_h,overlap_h,mp_m_h,mp_n_h);
-                        mp_v[0][b][c] = j_start;
-                        mp_h[0][b][c] = k_start;
-                        aux = input[j_start][k_start];
-                        for(int j=j_start;j<j_end;j++){
-                            for(int k=k_start;k<k_end;k++){
-                                if(input[j][k] > aux){
-                                    aux = input[j][k];
-                                    mp_v[0][b][c] = j;
-                                    mp_h[0][b][c] = k;
-                                }
+        if( f_v > input_shape[1] || f_h > input_shape[2]){
+            cerr << "filter too large or input too small.\n";
+            assert(f_v > input_shape[1]);
+            assert(f_h > input_shape[2]);
+        }
+        output_shape[1] = (input_shape[1]-f_v)/s_v + 1;
+        output_shape[2] = (input_shape[2]-f_h)/s_h + 1;
+        assert(output_shape[1] >= 1 && output_shape[2] >= 1);
+        output_size = output_shape[0]*output_shape[1]*output_shape[2];
+        p = new double[output_size];
+        q = new double[output_size];
+        n_param = output_shape[0]*input_shape[0]*f_v*f_h + output_shape[0];
+        theta = new double[n_param];
+        Z = new double[input_size];
+        dL = new double[n_param];
+        initQ = true;
+    }
+    void randomize(double scale = 1.) override {
+        assert(initQ);
+        int i_d = input_shape[0], i_v = input_shape[1], i_h = input_shape[2],
+            o_d = output_shape[0], o_v = output_shape[1], o_h = output_shape[2];
+        for(int i=0;i<o_d;i++) for(int j=0;j<i_d;j++) for(int k=0;k<f_v;k++) for(int l=0;l<f_h;l++) theta[i_d*f_v*f_h*i + f_v*f_h*j + f_h*k + l] = rand_U(scale);
+        for(int i=0;i<o_d;i++) theta[o_d*i_d*f_v*f_h + i] = rand_U(0.1*scale);
+    }
+    void forward(double * x) override {
+        int i_d = input_shape[0], i_v = input_shape[1], i_h = input_shape[2],
+            o_d = output_shape[0], o_v = output_shape[1], o_h = output_shape[2];
+        //The code below is equivalent to the following, but slightly more efficient:
+        // for(int a=0;a<o_d;a++){
+        //     for(int b=0;b<o_v;b++){
+        //         for(int c=0;c<o_h;c++){
+        //             double aux = 0.;
+        //             for(int i=0;i<i_d;i++) for(int j=0;j<f_v;j++) for(int k=0;k<f_h;k++) aux += theta[i_d*f_v*f_h*a + f_v*f_h*i + f_h*j + k]*x[i_v*i_h*i + i_h*(j+b*s_v) + (k+c*s_h)];
+        //             aux += theta[o_d*i_d*f_v*f_h + a];
+        //             p[o_v*o_h*a + o_h*b + c] = activ.f(aux);
+        //             q[o_v*o_h*a + o_h*b + c] = activ.df(aux);
+        //         }
+        //     }
+        // }
+        int C1 = i_v*i_h;
+        int C7 = o_v*o_h;
+        int C8 = f_v*f_h;
+        for(int a=0;a<o_d;a++){
+            int C2 = i_d*C8*a;
+            for(int b=0;b<o_v;b++){
+                for(int c=0;c<o_h;c++){
+                    int C9 = C7*a + o_h*b + c;
+                    double aux = 0.;
+                    for(int i=0;i<i_d;i++){
+                        int C3 = C8*i;
+                        int C4 = C1*i;
+                        for(int j=0;j<f_v;j++){
+                            int C5 = f_h*j;
+                            int C6 = i_h*(j+b*s_v);
+                            for(int k=0;k<f_h;k++){
+                                aux += theta[C2+C3+C5+k]*x[C4+C6+(k+s_h*c)];
                             }
                         }
-                        p_c[0][b][c] = aux;
                     }
+                    aux += theta[o_d*i_d*C8 + a];
+                    p[C9] = activ.f(aux);
+                    q[C9] = activ.df(aux);
                 }
             }
-            else cerr << "4. unknown error...\n";
         }
-        void forward(double *** input){ // rank-3 input, for conv layers only
-            double aux;
-            if(type == "conv"){
-                for(int a=0;a<out_d;a++){
-                    for(int b=0;b<out_v;b++){
-                        for(int c=0;c<out_h;c++){
-                            aux = 0;
-                            for(int i=0;i<inp_d;i++) for(int j=0;j<f_v;j++) for(int k=0;k<f_h;k++) aux += filter[a][i][j][k]*input[i][j+b*stride_v][k+c*stride_h];
-                            aux += biases[a];
-                            p_c[a][b][c] = activ.f(aux);
-                            q_c[a][b][c] = activ.df(aux);
-                        }
-                    }
-                }
-            }
-            else if(type == "maxpool"){
-                // double aux;
-                // int j_start, j_end, k_start, k_end;
-                // for(int a=0;a<out_d;a++){
-                //     for(int b=0;b<out_v;b++){
-                //         softpad_range(j_start,j_end,b,f_v,overlap_v,mp_m_v,mp_n_v);
-                //         for(int c=0;c<out_h;c++){
-                //             softpad_range(k_start,k_end,c,f_h,overlap_h,mp_m_h,mp_n_h);
-                //             aux = input[a][j_start][k_start];
-                //             for(int j=j_start;j<j_end;j++) for(int k=k_start;k<k_end;k++) aux = max(aux, input[a][j][k]);
-                //             p_c[a][b][c] = aux;
-                //             //p_c[a][b][c] = input[a][mp_v[a][b][c]][mp_h[a][b][a]]
-                //         }
-                //     }
-                // }
-                int j_start, j_end, k_start, k_end;
-                for(int a=0;a<out_d;a++){
-                    for(int b=0;b<out_v;b++){
-                        softpad_range(j_start,j_end,b,f_v,overlap_v,mp_m_v,mp_n_v);
-                        for(int c=0;c<out_h;c++){
-                            softpad_range(k_start,k_end,c,f_h,overlap_h,mp_m_h,mp_n_h);
-                            mp_v[a][b][c] = j_start;
-                            mp_h[a][b][c] = k_start;
-                            aux = input[a][j_start][k_start];
-                            for(int j=j_start;j<j_end;j++){
-                                for(int k=k_start;k<k_end;k++){
-                                    if(input[a][j][k] > aux){
-                                        aux = input[a][j][k];
-                                        mp_v[a][b][c] = j;
-                                        mp_h[a][b][c] = k;
-                                    }
-                                }
+    }
+    void backward(double * x) override {
+        int i_d = input_shape[0], i_v = input_shape[1], i_h = input_shape[2],
+            o_d = output_shape[0], o_v = output_shape[1], o_h = output_shape[2];
+        //The code below is equivalent to this, but slightly more efficient:
+        // for(int a=0;a<i_d;a++){
+        //     for(int b=0;b<i_v;b++){
+        //         int min_j = max(0,(b-f_v+s_v)/s_v);
+        //         int max_j = min(o_v,1+b/s_v);
+        //         for(int c=0;c<i_h;c++){
+        //             int min_k = max(0,(c-f_h+s_h)/s_h);
+        //             int max_k = min(o_h,1+c/s_h);
+        //             double aux = 0.;
+        //             for(int i=0;i<o_d;i++){
+        //                 for(int j=min_j;j<max_j;j++){
+        //                     for(int k=min_k;k<max_k;k++){
+        //                         aux += x[o_v*o_h*i + o_h*j + k]*q[o_v*o_h*i + o_h*j + k]*theta[i_d*f_v*f_h*i + f_v*f_h*a + f_h*(b-j*s_v) + (c-k*s_h)];
+        //                     }
+        //                 }
+        //             }
+        //             Z[i_v*i_h*a + i_h*b + c] = aux;
+        //         }
+        //     }
+        // }
+        int C3 = o_v*o_h;
+        int C4 = f_v*f_h;
+        for(int b=0;b<i_v;b++){
+            int min_j = max(0,(b-f_v+s_v)/s_v);
+            int max_j = min(o_v,1+b/s_v);
+            for(int c=0;c<i_h;c++){
+                int min_k = max(0,(c-f_h+s_h)/s_h);
+                int max_k = min(o_h,1+c/s_h);
+                for(int a=0;a<i_d;a++){
+                    double aux = 0.;
+                    for(int i=0;i<o_d;i++){
+                        int C1 = C3*i;
+                        int C2 = C4*(i_d*i+a);
+                        for(int j=min_j;j<max_j;j++){
+                            int C5 = C1+o_h*j;
+                            int C6 = f_h*(b-j*s_v);
+                            for(int k=min_k;k<max_k;k++){
+                                aux += x[C5+k]*q[C5+k]*theta[C2+C6+(c-k*s_h)];
                             }
-                            p_c[a][b][c] = aux;
-                            //p_c[a][b][c] = input[a][mp_v[a][b][c]][mp_h[a][b][c]]
                         }
                     }
+                    Z[i_v*i_h*a + i_h*b + c] = aux;
                 }
             }
-            else cerr << "4. unknown error...\n";
         }
+    }
 
-        friend ostream& operator<<(ostream& os, const layer& L){ //prints layer to stream
-            if(!L.initializedQ) os << "empty layer.\n";
-            else if(L.type == "dense"){
-                os << "weights: {";
-                for(int i=0;i<L.n_out;i++){
-                    os << "{";
-                    if(L.n_in == 0) os << "?}";
-                    for(int j=0;j<L.n_in;j++){
-                        os << L.weights[i][j] << (j<L.n_in-1 ? "," : "}");
-                    }
-                    os << (i<L.n_out-1 ? "," : "}");
-                }
-                os << "\nbiases: {";
-                for(int i=0;i<L.n_out;i++) os << L.biases[i] << (i<L.n_out-1 ? "," : "}\n");
-            }
-            else if(L.type == "conv"){
-                for(int i=0;i<L.out_d;i++){
-                    switch(i){
-                    case 0: os << "first kernel-\n"; break;
-                    case 1: os << "second kernel-\n"; break;
-                    case 2: os << "third kernel-\n"; break;
-                    default: os << i+1 << "th kernel-\n";
-                    }
+    void zero_grad() override{
+        for(int i=0;i<n_param;i++) dL[i] = 0.;
+    }
 
-                    os << "weights: {";
-                    for(int j=0;j<L.inp_d;j++){
-                        os << "{";
-                        for(int k=0;k<L.f_v;k++){
-                            os << "{";
-                            for(int l=0;l<L.f_h;l++){
-                                os << L.filter[i][j][k][l] << (l<L.f_h-1 ? ",":"}");
+    void update_derivatives(double * x, double * z) override {
+        int i_d = input_shape[0], i_v = input_shape[1], i_h = input_shape[2],
+            o_d = output_shape[0], o_v = output_shape[1], o_h = output_shape[2];
+        for(int i=0;i<o_d;i++) for(int j=0;j<i_d;j++) for(int k=0;k<f_v;k++) for(int l=0;l<f_h;l++){
+            double aux = 0.;
+            for(int b=0;b<o_v;b++) for(int c=0;c<o_h;c++) aux += z[o_v*o_h*i + o_h*b + c]*q[o_v*o_h*i + o_h*b + c]*x[i_v*i_h*j + i_h*(k+b*s_v) + (l+c*s_h)];
+            dL[i_d*f_v*f_h*i + f_v*f_h*j + f_h*k + l] += aux;
+        }
+        for(int i=0;i<o_d;i++){
+            double aux = 0.;
+            for(int b=0;b<o_v;b++) for(int c=0;c<o_h;c++) aux += z[o_v*o_h*i + o_h*b + c]*q[o_v*o_h*i + o_h*b + c];
+            dL[o_d*i_d*f_v*f_h+i] += aux;
+        }
+    }
+
+    int f_v = -1, f_h = -1, s_v = -1, s_h = -1;
+};
+
+
+/*
+Next, we define a (2d) maxpool layer.
+
+Declare as
+    maxpool;
+for a maxpool layer, using the default size `(f_v,f_h) = (2,2)`, or as
+    maxpool(3,4);
+for a layer with size 3x4. Note: again, we do not allow for padding so the filter size should fit the input properly. See the notes in
+the `conv` layer if padding is required. Note also: we do not allow for overlaps either: the stride is always equal to the filter size.
+*/
+class maxpool: public layer{
+public:
+    maxpool(){
+        input_rank = output_rank = 3;
+        input_shape = new int[3];
+        output_shape = new int[3];
+        f_v = 2;
+        f_h = 2;
+    }
+    maxpool(int fv, int fh){
+        assert(fv >= 1 && fh >= 1);
+        input_rank = output_rank = 3;
+        input_shape = new int[3];
+        output_shape = new int[3];
+        f_v = fv;
+        f_h = fh;
+    }
+    int print(bool longQ = false, ostream & os = cout) override {
+        //TODO: print info about filter size
+        os << "maxpool layer, output size: " << output_shape[0] << "x" << output_shape[1] << "x" << output_shape[2] << endl;
+        return n_param;
+    }
+
+    ~maxpool() override {
+        delete[] input_shape;
+        delete[] output_shape;
+        if(initQ){
+            delete[] p;
+            delete[] mp_v;
+            delete[] mp_h;
+            delete[] Z;
+        }
+    }
+
+protected:
+    void init(int * prev_shape, int prev_rank) override {
+        assert(!initQ);
+        assert(prev_rank == 3);
+        input_shape[0] = prev_shape[0];
+        input_shape[1] = prev_shape[1];
+        input_shape[2] = prev_shape[2];
+        input_size = input_shape[0]*input_shape[1]*input_shape[2];
+
+
+        assert(input_shape[1] % f_v == 0);
+        assert(input_shape[2] % f_h == 0);
+
+        output_shape[0] = prev_shape[0];
+        output_shape[1] = input_shape[1]/f_v;
+        output_shape[2] = input_shape[2]/f_h;
+        output_size = output_shape[0]*output_shape[1]*output_shape[2];
+
+        p = new double[output_size];
+        mp_v = new int[output_size];
+        mp_h = new int[output_size];
+        Z = new double[input_size];
+        initQ = true;
+    }
+    void randomize(double scale = 1.) override {}
+    void forward(double * x) override {
+        int i_d = input_shape[0], i_v = input_shape[1], i_h = input_shape[2],
+            o_d = output_shape[0], o_v = output_shape[1], o_h = output_shape[2];
+        for(int a=0;a<o_d;a++){
+            for(int b=0;b<o_v;b++){
+                for(int c=0;c<o_h;c++){
+                    int abc = o_v*o_h*a + o_h*b + c;
+                    mp_v[abc] = b*f_v;
+                    mp_h[abc] = c*f_h;
+                    double aux = x[i_v*i_h*a + i_h*b*f_v + c*f_h];
+                    for(int j=0;j<f_v;j++){
+                        for(int k=0;k<f_h;k++){
+                            if(x[i_v*i_h*a + i_h*(j+b*f_v) + (k+c*f_h)] > aux){
+                                aux = x[i_v*i_h*a + i_h*(j+b*f_v) + (k+c*f_h)];
+                                mp_v[abc] = j+b*f_v;
+                                mp_h[abc] = k+c*f_h;
                             }
-                            os << (k<L.f_v-1 ? ",":"}");
                         }
-                        os << (j<L.inp_d-1 ? ",":"}");
                     }
-                    os << "\nbias: " << L.biases[i] << (i<L.out_d-1 ? "\n\n" : "\n");
-                }
-                if(L.stride_v != 1 || L.stride_h != 1){
-                    if(L.stride_v == L.stride_h) os << "(Stride: " << L.stride_h << ")\n";
-                    else os << "(Vertical stride: " << L.stride_v << ", Horizontal stride: " << L.stride_h << ")\n";
+                    p[abc] = aux;
                 }
             }
-            else if(L.type == "maxpool"){
-                os << "Max-pool layer.\n";
-                //os << "Number of channels: " << L.out_d;
-                os << "Filter size: " << L.f_v << "x" << L.f_h << "\n";
-                if(L.overlap_v != 0 || L.overlap_h != 0){
-                    if(L.overlap_v == L.overlap_h) os << "Overlap: " << L.overlap_h << "\n";
-                    else os << "Vertical overlap: " << L.overlap_v << ", Horizontal overlap: " << L.overlap_h << "\n";
-                }
-                if(L.mp_m_v+L.mp_m_h > 0) os << "(Soft-pad parameters: v = (" << L.mp_m_v << "," << L.mp_n_v << "), h = (" << L.mp_m_h << "," << L.mp_n_h << "))\n";
-                os << "Input size: " << L.inp_d << "x" << L.inp_v << "x" << L.inp_h << "\n";
-                os << "Output size: " << L.out_d << "x" << L.out_v << "x" << L.out_h << "\n";
-            }
-            else if(L.type == "softmax") os << "Soft-max layer.\n";
-            else cerr << "5. unknown error...\n";
-            return os;
+        }
+    }
+    void backward(double * x) override {
+        int i_d = input_shape[0], i_v = input_shape[1], i_h = input_shape[2],
+            o_d = output_shape[0], o_v = output_shape[1], o_h = output_shape[2];
+        for(int i=0;i<i_d;i++) for(int j=0;j<i_v;j++) for(int k=0;k<i_h;k++){
+            Z[i_v*i_h*i + i_h*j + k] = 0.;
+        }
+        for(int a=0;a<o_d;a++) for(int b=0;b<o_v;b++) for(int c=0;c<o_h;c++) Z[i_v*i_h*a + i_h*mp_v[o_v*o_h*a + o_h*b + c] + mp_h[o_v*o_h*a + o_h*b + c]] = x[o_v*o_h*a + o_h*b + c];
+    }
+
+    void zero_grad() override {}
+    void update_derivatives(double*, double*) override {}
+
+    int f_v = -1, f_h = -1;
+    int * mp_v, * mp_h; // vertical and horizontal position of the max element
+};
+
+/*
+Finally, we define a softmax layer.
+
+Declare as
+    softmax;
+for a softmax layer, using the default weight `w = 1.`, or as
+    maxpool(0.8);
+for a layer with weight `w = 0.8`
+*/
+class softmax: public layer{
+public:
+    softmax(){
+        weight = 1.;
+    }
+    softmax(double w){
+        assert(w > 0.);
+        weight = w;
+    }
+    int print(bool longQ = false, ostream & os = cout) override {
+        if(weight == 1.) os << "softmax layer." << endl;
+        else os << "softmax layer, weight: " << weight << endl;
+        return 0;
+    }
+
+    ~softmax() override {
+        if(initQ){
+            delete[] p;
+            delete[] Z;
+        }
+    }
+
+protected:
+    void init(int * prev_shape, int prev_rank) override {
+        assert(!initQ);
+        input_size = 1;
+        for(int i=0;i<prev_rank;i++) input_size *= prev_shape[i];
+        output_size = input_size;
+        p = new double[output_size];
+        Z = new double[input_size];
+        initQ = true;
+    }
+    void randomize(double) override {}
+    void forward(double * x) override {
+        double max = x[0];
+        for(int i=0;i<output_size;i++) max = max > x[i] ? max : x[i];
+        double den = 0.;
+        for(int i=0;i<output_size;i++) p[i] = exp(weight*(x[i]-max));
+        for(int i=0;i<output_size;i++) den += p[i];
+        for(int i=0;i<output_size;i++) p[i] /= den;
+    }
+    void backward(double * x) override {
+        for(int i=0;i<input_size;i++){
+            double aux = 0.;
+            for(int j=0;j<output_size;j++) aux += x[j]*weight*p[i]*((i==j)-p[j]);
+            Z[i] = aux;
         }
 
-        double operator [](initializer_list<int> indices){
-            if(type == "dense" || type == "softmax"){
-                assert(indices.size() == 1);
-                return p_d[*(indices.begin())];
-            }
-            else if(type == "conv" || type == "maxpool"){
-                if(indices.size() == 2){
-                    assert(out_d == 1);
-                    return p_c[0][*(indices.begin())][*(indices.begin()+1)];
+    }
+
+    void zero_grad() override {}
+    void update_derivatives(double*,double*) override {}
+
+    double weight;
+};
+
+
+
+/*
+We can now define a network class. It takes a list of pointers to various `layer`s, which can be any subclass, either the predefined
+ones above (input, dense, conv, etc.), or entirely new ones. As long as the various methods (init, forward, backward, etc.) have been
+specified, any layer type should work.
+
+The attributes of a network are simply its depth ( = number of layers) and its architecture ( = list of pointers to all its layers,
+sequentially).
+
+The methods are the usual (`forward`, which performs a complete forward pass, `backward`, which performs a complete backward pass, etc.)
+plus a few other utilities, such as `activation(int,int)`, which allows one to access the value of the activation ( = output) of hidden
+layers, as well as `cost(double**,double**,int,loss)`, which computes the average loss across a list of samples, according to some choice
+of loss function (default = least square).
+*/
+class network{
+public:
+    const long unsigned int depth;
+    layer ** arch;
+
+    network(initializer_list<layer*> lyrs):depth{lyrs.size()}{
+        assert(depth > 0);
+        arch = new layer*[depth];
+        copy(lyrs.begin(),lyrs.end(),arch);
+
+        bool no_layer_sharing = true; // check that all layers are distinct
+        for(int l=0;l<depth;l++) for(int r=l+1;r<depth;r++) no_layer_sharing *= arch[l] != arch[r];
+        assert(no_layer_sharing);
+
+        arch[0]->init(); // initializes first layer
+        for(int l=1;l<depth;l++) arch[l]->init(arch[l-1]->output_shape,arch[l-1]->output_rank); // initializes the rest of layers
+                                                                                                // using the size of the previous one
+    }
+    layer * operator [](int i){ // returns pointer to `l`-th layer. TODO: perhaps return the layer itself?
+        assert(i >= 0 && i < depth);
+        return arch[i];
+    }
+    double activation(int l, int i){ // returns the `i`-th component of the output of the `l`-th layer
+        assert(l >= 0 && l < depth);
+        assert(i >= 0 && i < arch[l]->output_size);
+        return arch[l]->p[i];
+    }
+    double activation(int i){ // returns the `i`-th component of the output of the last layer, i.e., of the network itself
+        assert(i >= 0 && i<arch[depth-1]->output_size);
+        return arch[depth-1]->p[i];
+    }
+    int output_size(int l){ // returns the size of the output of the `l`-th layer
+        return arch[l]->output_size;
+    }
+
+    int print(bool longQ = false, ostream & os = cout){ // prints network details to stream, either in short or long format
+        int n_param = 0;
+        os << "------------------------------------------------------------------------------------------\n";
+        for(int l=0;l<depth;l++){
+            n_param += arch[l]->print(longQ,os);
+            os << "------------------------------------------------------------------------------------------\n";
+        }
+        if(longQ) os << "total number of parameters: " << n_param << endl;
+        return n_param;
+    }
+
+    void randomize(double scale = 1.){
+        //TODO: add option for xavier-he
+        for(int l=1;l<depth;l++) arch[l]->randomize(scale);
+    }
+
+    void forward(double * x){ // performs forward pass, each layer gets as input the output of the previous one
+        //TODO: perhaps add optional int parameter `l_max` to stop the forward pass early (if last few activations are not needed)
+        arch[0]->forward(x);
+        for(int l=1;l<depth;l++) arch[l]->forward(arch[l-1]->p);
+    }
+    void backward(double * L){ // performs backward pass, each layer gets as input the gradients of the next one
+        //TODO: perhaps add optional int parameter `l_min` to stop the backward pass early (if first few gradients are not needed)
+        arch[depth-1]->backward(L);
+        for(int l=depth-2;l>0;l--) arch[l]->backward(arch[l+1]->Z);
+    }
+
+    void zero_grad(){
+        for(int l=1;l<depth;l++) arch[l]->zero_grad();
+    }
+
+    void update_derivatives(double * L){ // updates derivatives for a single sample. Each layer gets as input the output of the
+                                         // previous layer, and the gradients of the next one.
+        for(int l=1;l<depth-1;l++) arch[l]->update_derivatives(arch[l-1]->p, arch[l+1]->Z);
+        arch[depth-1]->update_derivatives(arch[depth-2]->p, L);
+    }
+
+    double cost(double ** x, double ** y, int sample_size, loss loss_fnc = least_sq){ // computes the current cost, using some loss function
+        double C = 0;
+        for(int s=0;s<sample_size;s++){
+            forward(x[s]);
+            for(int a=0;a<arch[depth-1]->output_size;a++) C += loss_fnc.f(arch[depth-1]->p[a],y[s][a])/(sample_size*(arch[depth-1]->output_size));
+        }
+        return C;
+    }
+
+    ~network(){
+        delete[] arch;
+    }
+
+    void clear(){ // if declared using `new` (not recommended).
+        for(int l=0;l<depth;l++) delete arch[l];
+    }
+};
+
+
+/*
+The last ingredient is an optimizer, namely a class that takes a network and a list of samples, and iteratively performs forward and
+backward passes using the derivatives to minimize the loss.
+
+Here we define a base class, while different choices of optimization methods are handled via subclasses that override the `step` method
+(which concretely specifies what to do with the derivatives computed after a given forward/backward pass).
+
+We define stochastic gradient descent (SGD) and Adam below. User-defined optimizers are allowed too, simply inherit this class and
+override the `step` method (and the constructor, of course).
+*/
+class optimizer{
+public:
+    loss loss_fnc = least_sq; // default loss function
+    virtual ~optimizer() {}
+    void train(double ** x, double ** y, int sample_size, int batch_size, double LR, int epochs, bool prog_bar = true, bool shuffle = false){
+
+            if(sample_size % batch_size != 0) cerr << "warning, mini-batches don't fit!\n";
+            cout << "Training parameters:\n-Number of samples: " << sample_size << "\n-Size of mini-batch: " << batch_size << "\n-Learning rate: " << LR << "\n-Number of epochs: " << epochs << endl;
+
+            cout << "[training...]" << endl;
+            for(int ep=0;ep<epochs;ep++){
+                if(shuffle) shuffle_samples(x,y,sample_size); // TODO: perhaps, no need to shuffle the whole array, just the minibatches...
+                //cout << " " << N->cost(x,y,sample_size,loss_fnc) << ",";
+                //cout.flush();
+                double C = 0; // estimate of the cost after each epoch. Note: not the exact loss, since parameters are updated after each mini-batch. Uncomment previous lines if exact loss is needed (will slow down training).
+                for(int t=0;t<sample_size/batch_size;t++){
+                    if(prog_bar) {progress_bar_before(t,sample_size/batch_size+1,80); cout.flush();}
+                    N->zero_grad();
+                    for(int u=0;u<batch_size;u++){
+                        N->forward(x[t*batch_size+u]);
+                        for(int i=0;i<output_size;i++) L[i] = loss_fnc.df(N->arch[depth-1]->p[i],y[t*batch_size+u][i])/(output_size*batch_size);
+                        N->backward(L);
+                        N->update_derivatives(L);
+                        if(prog_bar) for(int i=0;i<output_size;i++) C += loss_fnc.f(N->arch[depth-1]->p[i],y[t*batch_size+u][i])/(output_size*sample_size);
+                    }
+                    step(LR);
+                    if(prog_bar) progress_bar_after(t,sample_size/batch_size+1,80);
                 }
-                else if(indices.size() == 3){
-                    return p_c[*(indices.begin())][*(indices.begin()+1)][*(indices.begin()+2)];
-                }
-                else assert(false);
+                if(prog_bar) cout << " cost = " << C << endl;
             }
-            else cerr << "6. unknown error...\n";
+            cout << "[done]" << endl;
         }
 
-        double operator [](int i){
-            assert(type == "dense" || type == "softmax");
-            return p_d[i];
+protected:
+    int depth, output_size;
+    double * L;
+    network * N;
+    virtual void step(double){}
+};
+
+/*
+Stochastic gradient descent optimizer, with optional momentum (on by default).
+
+The basic step is theta -= LR*dL, where LR is the learning rate, and dL is the derivative.
+
+With momentum, m = beta*m+(1-beta)*dL and theta -= LR*m, where beta is a hyperparameter (default = 0.9).
+
+*/
+class SGD: public optimizer{
+public:
+    SGD(network * ntwrk, bool mmntm = true, double b = 0.9){
+        N = ntwrk;
+        depth = N->depth;
+        momentumQ = mmntm;
+        if(momentumQ){
+            m = new double*[depth];
+            for(int l=1;l<depth;l++) m[l] = new double[N->arch[l]->n_param];
+            for(int l=1;l<depth;l++) for(int i=0;i<N->arch[l]->n_param;i++) m[l][i] = 0.;
         }
-        //double operator [](int i, int j, int k){ // requires c++23
-        //    assert(type == "conv");
-        //    return p_c[i][j][k];
-        //}
+        output_size = N->arch[depth-1]->output_size;
+        L = new double[output_size];
+        beta = b;
+    }
+    ~SGD() override {
+        delete[] L;
+        if(momentumQ){
+            for(int l=1;l<depth;l++) delete[] m[l];
+            delete[] m;
+        }
+    }
 
-    private:
-        int n_in = 0, n_out = 0; // for dense
-        int stride_h = 1, stride_v = 1; // for conv
-        int inp_h = 0, inp_v = 0, inp_d = 0; // for conv
-        int out_d, out_h, out_v; // for conv
-        int f_h = 3, f_v = 3; // for conv
-        int overlap_v = 0, overlap_h = 0; // for maxpool
-        string type = "empty";
-        bool initializedQ = false;
+private:
+    void step(double LR) override {
+        for(int l=1;l<depth;l++){
+            for(int i=0;i<N->arch[l]->n_param;i++){
+                if(momentumQ){
+                    m[l][i] = beta*m[l][i]+(1-beta)*N->arch[l]->dL[i];
+                    N->arch[l]->theta[i] -= LR*m[l][i];
+                }
+                else N->arch[l]->theta[i] -= LR*N->arch[l]->dL[i];
+            }
+        }
+    }
 
-        int mp_m_v, mp_n_v, mp_m_h, mp_n_h; // auxiliary parameters for maxpool
+    double ** m;
+    double beta;
+    bool momentumQ;
 
 };
 
-int layer::get_numb_of_inp_neurons(){ // returns size of input for a dense layer
-    assert(type == "dense");
-    assert(initializedQ);
-    return n_in;
-}
-int layer::get_numb_of_out_neurons(){ // returns size of output for a dense layer
-    assert(type == "dense");
-    assert(initializedQ);
-    return n_out;
-}
-int layer::get_numb_of_inp_channels(){ // returns depth of input for a conv layer (depth = number of channels)
-    assert(type == "conv" || type == "maxpool");
-    assert(initializedQ);
-    return inp_d;
-}
-int layer::get_numb_of_out_channels(){ // returns depth of output for a conv layer (depth = number of channels)
-    assert(type == "conv" || type == "maxpool");
-    assert(initializedQ);
-    return out_d;
-}
-int layer::get_inp_im_size(char c = ' '){  // returns height and width of input for a conv layer
-    assert(type == "conv" || type == "maxpool");
-    assert(initializedQ);
-    switch(c){
-        case ' ': if(inp_h == inp_v) return inp_h; else {cerr << "warning: horizontal and vertical input image size are not equal. Use get_inp_im_size('v') or get_inp_im_size('h') instead.\n"; return 0;};
-        case 'v': return inp_v;
-        case 'h': return inp_h;
-        default: assert(false);
+/*
+Adam optimizer.
+
+The basic step is m = beta1*m + (1-beta1)*dL, v = beta2*v + (1-beta2)*dL**2, theta -= LR*m/sqrt(v), for some hyperparameters
+beta1 and beta2 (default = 0.9 and 0.999, respectively).
+
+We actually use unbiased estimates so we replace m by m/(1-beta1**n) and v by v/(1-beta2**n) in the last step, where n is the
+current number of iterations.
+*/
+class Adam: public optimizer{
+public:
+    Adam(network * ntwrk, double b1 = 0.9, double b2 = 0.999){
+        N = ntwrk;
+        depth = N->depth;
+        m = new double*[depth];
+        for(int l=1;l<depth;l++) m[l] = new double[N->arch[l]->n_param];
+        for(int l=1;l<depth;l++) for(int i=0;i<N->arch[l]->n_param;i++) m[l][i] = 0.;
+        v = new double*[depth];
+        for(int l=1;l<depth;l++) v[l] = new double[N->arch[l]->n_param];
+        for(int l=1;l<depth;l++) for(int i=0;i<N->arch[l]->n_param;i++) v[l][i] = 0.;
+        
+        output_size = N->arch[depth-1]->output_size;
+        L = new double[output_size];
+        beta1 = beta1_n = b1;
+        beta2 = beta2_n = b2;
     }
-}
-int layer::get_out_im_size(char c = ' '){  // returns height and width of output for a conv layer
-    assert(type == "conv" || type == "maxpool");
-    assert(initializedQ);
-    switch(c){
-        case ' ': if(out_h == out_v) return out_h; else {cerr << "warning: horizontal and vertical output image size are not equal. Use get_out_im_size('v') or get_out_im_size('h') instead.\n"; return 0;};
-        case 'v': return out_v;
-        case 'h': return out_h;
-        default: assert(false);
+    ~Adam() override {
+        delete[] L;
+        for(int l=1;l<depth;l++) delete[] m[l];
+        delete[] m;
+        for(int l=1;l<depth;l++) delete[] v[l];
+        delete[] v;
     }
-}
-void layer::set_pool_overlap(int ov, int oh){ // whether pools overlap when maxpooling; default = no overlap
-    assert(type == "maxpool" && ov >= 0 && oh >= 0 && ov < f_v && oh < f_h);
-    assert(!initializedQ);
-    overlap_v = ov;
-    overlap_h = oh;
-}
-void layer::set_pool_overlap(int ov){
-    set_pool_overlap(ov, ov);
-}
-void layer::set_filter_size(int fsizev, int fsizeh){ // sets height and width of filter for a conv layer
-    assert((type == "conv" || type == "maxpool") && fsizeh > 0 && fsizev >0);
-    assert(!initializedQ);
-    f_v = fsizev;
-    f_h = fsizeh;
-}
-void layer::set_filter_size(int fsize){
-    set_filter_size(fsize, fsize);
-}
-int layer::get_filter_size(char c = ' '){ // returns height and width of filter for a conv layer
-    assert(type == "conv" || type == "maxpool");
-    assert(initializedQ);
-    switch(c){
-        case ' ': if(f_h == f_v) return f_h; else {cerr << "warning: horizontal and vertical filter sizes are not equal. Use get_filter_size('v') or get_filter_size('h') instead.\n"; return 0;};
-        case 'v': return f_v;
-        case 'h': return f_h;
-        default: assert(false);
+
+private:
+    void step(double LR) override {
+        for(int l=1;l<depth;l++){
+            for(int i=0;i<N->arch[l]->n_param;i++){
+                m[l][i] = beta1*m[l][i]+(1-beta1)*(N->arch[l]->dL[i]);
+                v[l][i] = beta2*v[l][i]+(1-beta2)*(N->arch[l]->dL[i])*(N->arch[l]->dL[i]);
+                N->arch[l]->theta[i] -= LR*(m[l][i]/(1-beta1_n))/(sqrt((v[l][i])/(1-beta2_n))+.000000001); // small shift to prevent division by zero
+            }
+        }
+        beta1_n *= beta1; beta2_n *= beta2;
     }
-}
-void layer::set_stride(int strd_v, int strd_h){ // sets vertical and horizontal stride for a conv layer
-    assert((type == "conv" || type == "maxpool") && strd_v > 0 && strd_h > 0);
-    assert(!initializedQ);
-    stride_v = strd_v;
-    stride_h = strd_h;
-}
-void layer::set_stride(int strd){
-    set_stride(strd, strd);
-}
-int layer::get_stride(char c = ' '){ // returns vertical and horizontal stride for a conv layer
-    assert(type == "conv" || type == "maxpool");
-    assert(initializedQ);
-    switch(c){
-        case ' ': if(stride_h == stride_v) return stride_h; else {cerr << "warning: horizontal and vertical stride are not equal. Use get_stride('v') or get_stride('h') instead.\n"; return 0;};
-        case 'v': return stride_v;
-        case 'h': return stride_h;
-        default: assert(false);
-    }
-}
-string layer::get_type(){
-    return type;
-}
 
-class network{
-    /*Class for neural network. For now, only supports convolutional and dense layers, as well as softmax. Fully connected network is fine, i.e., conv layers need not
-    appear at all, but if they do, they can never postcede a dense one, and last layer must always be dense (or dense plus softmax). If last layer is softmax, it is
-    recommended to use `activ = id` for the previous layer, so that the input to softmax is a logit instead of a probability.
-
-    To do: option for maxpool (WIP), batch normalization, xavier-he initialization, etc.
-
-    Declare as `network NN({input size}, pointer to list of layers, lenght of list of layers)`. For example, a network with 3x10x10 input, one conv layer with
-    two filters, and one dense layer with nine neurons, is created as follows:
-    int depth = 2;
-    layer L[depth];
-    L[0].set("conv",2);
-    L[1].set("dense",9);
-    network NN({3,10,10},L,depth);
-
-    If all layers are dense, input size is allowed to be either 3-dim as above, or 1-dim. For example, if the input is 1-dim with length six, and the network consists
-    of one dense layer with 11 neurons and one with 15 neurons, plus a softmax layer, then we can declare this as follows:
-    int depth = 3;
-    layer L[depth];
-    L[0].set("dense",11);
-    L[1].set("dense",15); L[1].activ = id;
-    L[2].set("softmax");
-    network NN({6},L,depth);
-
-    The default loss function is least squares, loss(a,b) = .5*(a-b)*(a-b), user-defined functions are allowed, handled via the `loss` struct defined in the `header.h`
-    file. For example, use `NN.loss_fnc = log_like;` for cross-entropy.
-
-    Training is done using the Adam method, with default parameters `adam_b1 = 0.9` and `adam_b2 = 0.999`. Run `NN.train(x, y, sample_size, batch_size,
-    learning_rate, number_of_epochs)` to run mini-batch gradient descent, minimizing `sum_s loss_fnc(p(x[s]),y[s])`.
-
-    To do: allow for other grad-desc methods.
-
-    Use `NN.randomize(s)` to set all weights and biases to random numbers between `-s` and `+s`. Use `print_to_file(filename)` to write weights and biases to textfile
-    and `read_from_file(filename)` to load weights and biases from textfile.
-
-    Use `NN.forward(x)` to perform forward passes, using `x` as input to the network. This computes `p` and `q`, where `p := activation(weights . x + bias)` and
-    `q := activation'(weights . x + bias)`.
-
-    //TODO: make params const and use network(...) : depth(list_length), etc.
-    */
-    public:
-        loss loss_fnc = least_sq; // default loss function: least squares
-        double adam_b1 = 0.9, adam_b2 = 0.999; // training parameters for Adam iteration
-
-        int get_depth() {return depth;}; // returns number of layers
-
-        network(initializer_list<int> inputDims, layer * list_of_layers, const int list_length, bool print_details = true){
-            //TODO: check that, if last activation is not non-negative, then loss makes sense for negative arguments
-            //TODO: check that maxpool layers are always sandwiched in between regular conv layers
-
-            assert(list_length > 0);
-            arch = list_of_layers;
-            depth = list_length;
-            assert(arch[0].type != "maxpool"); // cannot begin with maxpool for now
-
-            for(int l=0;l<depth-1;l++){ // check that there are no intermediate softmax layers
-                if(arch[l].type == "softmax") cerr << "Only last layer may be softmax!\n";
-                assert(arch[l].type != "softmax");
-            }
-            if(arch[depth-1].type == "softmax"){ // check if last layer is softmax or not
-                softmaxQ = true;
-                depth--;
-                if(depth == 0) cerr << "At least one dense layer required.\n";
-                assert(depth > 0);
-            }
-
-            for(int l=0;l<depth;l++){ // count how many conv layers there are, and that they all appear at the beginning
-                if(arch[l].type == "conv" || arch[l].type == "maxpool"){
-                    num_of_conv++;
-                    if(l>0 && arch[l-1].type != "conv" && arch[l-1].type != "maxpool"){
-                        cerr << "Error, cannot have conv/maxpool layer after a non-conv/non-maxpool layer.\n";
-                        assert(false);
-                    }
-                }
-            }
-            if(num_of_conv == depth){
-                cerr << "Must have at least one dense layer.\n";
-                assert(false);
-            }
-            if(arch[0].type == "conv"){ // initializes conv layers
-                if(inputDims.size() == 2){
-                    input_size_d = 1;
-                    input_size_v = *(inputDims.begin());
-                    input_size_h = *(inputDims.begin()+1);
-                }
-                else if(inputDims.size() == 3){
-                    input_size_d = *(inputDims.begin());
-                    input_size_v = *(inputDims.begin()+1);
-                    input_size_h = *(inputDims.begin()+2);
-                }
-                else{
-                    cerr << "Unclear initializer: first argument to network must be a list of two or three positive integers.\n";
-                    assert(false);
-                }
-
-                assert(input_size_d > 0 && input_size_v > 0 && input_size_h);
-                arch[0].inp_d = input_size_d;
-                arch[0].inp_v = input_size_v;
-                arch[0].inp_h = input_size_h;
-                arch[0].initialize();
-                for(int l=1;l<num_of_conv;l++){
-                    if(arch[l].type == "maxpool") arch[l].out_d = arch[l-1].out_d;
-                    arch[l].inp_d = arch[l-1].out_d;
-                    arch[l].inp_v = arch[l-1].out_v;
-                    arch[l].inp_h = arch[l-1].out_h;
-                    arch[l].initialize();
-                }
-                output_size_d = arch[num_of_conv-1].out_d;
-                output_size_v = arch[num_of_conv-1].out_v;
-                output_size_h = arch[num_of_conv-1].out_h;
-            }
-            else if(arch[0].type == "dense"){ // initializes dense layers
-                if(inputDims.size() == 1) input_size_dense = *(inputDims.begin());
-                else if(inputDims.size() == 3){
-                    input_size_d = *(inputDims.begin());
-                    input_size_v = *(inputDims.begin()+1);
-                    input_size_h = *(inputDims.begin()+2);
-                    input_size_dense = input_size_d*input_size_v*input_size_h;
-                }
-                else{
-                    cerr << "Unclear initializer: first argument to network must be a list of three positive integers, or one positive integer.\n";
-                    assert(false);
-                }
-                //output_size_dense = ;
-            }
-            else cerr << "unclear instructions...\n";
-
-            if(num_of_conv > 0) input_size_dense = output_size_d*output_size_v*output_size_h;
-
-            arch[num_of_conv].n_in = input_size_dense;
-            arch[num_of_conv].initialize();
-            for(int i=num_of_conv+1;i<depth;i++){
-                arch[i].n_in = arch[i-1].n_out;
-                arch[i].initialize();
-            }
-            output_size_dense = arch[depth-1].n_out;
-
-            if(softmaxQ){
-                arch[depth].n_out = output_size_dense;
-                arch[depth].initialize();
-            }
-
-
-            Xi_d = new double*[depth-num_of_conv]; // d(cost)/d(bias) for a single sample, for dense layers
-            for(int l=0;l<depth-num_of_conv;l++) Xi_d[l] = new double[arch[l+num_of_conv].n_out];
-
-            Xi_c = new double***[num_of_conv]; // d(cost)/d(bias) for a single sample, for conv layers
-            for(int l=0;l<num_of_conv;l++) Xi_c[l] = new double**[arch[l].out_d];
-            for(int l=0;l<num_of_conv;l++) for(int i=0;i<arch[l].out_d;i++) Xi_c[l][i] = new double*[arch[l].out_v];
-            for(int l=0;l<num_of_conv;l++) for(int i=0;i<arch[l].out_d;i++) for(int j=0;j<arch[l].out_v;j++) Xi_c[l][i][j] = new double[arch[l].out_h];
-
-            flatten = new double[input_size_dense]; // flattens rank-3 output into rank-1
-
-            jf_c = new double****[num_of_conv]; // d(cost)/d(filter), for conv layer
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") jf_c[l] = new double***[arch[l].out_d];
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") for(int a=0;a<arch[l].out_d;a++) jf_c[l][a] = new double**[arch[l].inp_d];
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") for(int a=0;a<arch[l].out_d;a++) for(int i=0;i<arch[l].inp_d;i++) jf_c[l][a][i] = new double*[arch[l].f_v];
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") for(int a=0;a<arch[l].out_d;a++) for(int i=0;i<arch[l].inp_d;i++) for(int j=0;j<arch[l].f_v;j++) jf_c[l][a][i][j] = new double[arch[l].f_h];
-            mf_c = new double****[num_of_conv]; // for Adam
-            for(int l=0;l<num_of_conv;l++) mf_c[l] = new double***[arch[l].out_d];
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") for(int a=0;a<arch[l].out_d;a++) mf_c[l][a] = new double**[arch[l].inp_d];
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") for(int a=0;a<arch[l].out_d;a++) for(int i=0;i<arch[l].inp_d;i++) mf_c[l][a][i] = new double*[arch[l].f_v];
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") for(int a=0;a<arch[l].out_d;a++) for(int i=0;i<arch[l].inp_d;i++) for(int j=0;j<arch[l].f_v;j++) mf_c[l][a][i][j] = new double[arch[l].f_h];
-            vf_c = new double****[num_of_conv]; // for Adam
-            for(int l=0;l<num_of_conv;l++) vf_c[l] = new double***[arch[l].out_d];
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") for(int a=0;a<arch[l].out_d;a++) vf_c[l][a] = new double**[arch[l].inp_d];
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") for(int a=0;a<arch[l].out_d;a++) for(int i=0;i<arch[l].inp_d;i++) vf_c[l][a][i] = new double*[arch[l].f_v];
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") for(int a=0;a<arch[l].out_d;a++) for(int i=0;i<arch[l].inp_d;i++) for(int j=0;j<arch[l].f_v;j++) vf_c[l][a][i][j] = new double[arch[l].f_h];
-
-            jb_c = new double*[num_of_conv]; // d(cost)/d(bias), for conv layer
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") jb_c[l] = new double[arch[l].out_d];
-            mb_c = new double*[num_of_conv]; // for Adam
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") mb_c[l] = new double[arch[l].out_d];
-            vb_c = new double*[num_of_conv]; // for Adam
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") vb_c[l] = new double[arch[l].out_d];
-
-            jw_d = new double**[depth-num_of_conv]; // d(cost)/d(weight), for dense
-            for(int i=0;i<depth-num_of_conv;i++) jw_d[i] = new double*[arch[i+num_of_conv].n_out];
-            for(int i=0;i<depth-num_of_conv;i++) for(int j=0;j<arch[i+num_of_conv].n_out;j++) jw_d[i][j] = new double[arch[i+num_of_conv].n_in];
-            mw_d = new double**[depth-num_of_conv]; // for Adam
-            for(int i=0;i<depth-num_of_conv;i++) mw_d[i] = new double*[arch[i+num_of_conv].n_out];
-            for(int i=0;i<depth-num_of_conv;i++) for(int j=0;j<arch[i+num_of_conv].n_out;j++) mw_d[i][j] = new double[arch[i+num_of_conv].n_in];
-            vw_d = new double**[depth-num_of_conv]; // for Adam
-            for(int i=0;i<depth-num_of_conv;i++) vw_d[i] = new double*[arch[i+num_of_conv].n_out];
-            for(int i=0;i<depth-num_of_conv;i++) for(int j=0;j<arch[i+num_of_conv].n_out;j++) vw_d[i][j] = new double[arch[i+num_of_conv].n_in];
-
-            jb_d = new double*[depth-num_of_conv]; // d(cost)/d(bias), for dense
-            for(int i=0;i<depth-num_of_conv;i++) jb_d[i] = new double[arch[i+num_of_conv].n_out];
-            mb_d = new double*[depth-num_of_conv]; // for Adam
-            for(int i=0;i<depth-num_of_conv;i++) mb_d[i] = new double[arch[i+num_of_conv].n_out];
-            vb_d = new double*[depth-num_of_conv]; // for Adam
-            for(int i=0;i<depth-num_of_conv;i++) vb_d[i] = new double[arch[i+num_of_conv].n_out];
-
-            if(print_details){
-                cout << "Network initialized:\n";
-                print_size();
-                cout << endl;
-            }
-
-        }
-        ~network(){ // frees allocated arrays
-
-            for(int l=0;l<depth-num_of_conv;l++) delete[] Xi_d[l];
-            delete[] Xi_d;
-
-            for(int l=0;l<num_of_conv;l++) for(int i=0;i<arch[l].out_d;i++) for(int j=0;j<arch[l].out_v;j++) delete[] Xi_c[l][i][j];
-            for(int l=0;l<num_of_conv;l++) for(int i=0;i<arch[l].out_d;i++) delete[] Xi_c[l][i];
-            for(int l=0;l<num_of_conv;l++) delete[] Xi_c[l];
-            delete[] Xi_c;
-
-            delete[] flatten;
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") for(int a=0;a<arch[l].out_d;a++) for(int i=0;i<arch[l].inp_d;i++) for(int j=0;j<arch[l].f_v;j++) delete[] jf_c[l][a][i][j];
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") for(int a=0;a<arch[l].out_d;a++) for(int i=0;i<arch[l].inp_d;i++) delete[] jf_c[l][a][i];
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") for(int a=0;a<arch[l].out_d;a++) delete[] jf_c[l][a];
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") delete[] jf_c[l];
-            delete[] jf_c;
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") for(int a=0;a<arch[l].out_d;a++) for(int i=0;i<arch[l].inp_d;i++) for(int j=0;j<arch[l].f_v;j++) delete[] mf_c[l][a][i][j];
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") for(int a=0;a<arch[l].out_d;a++) for(int i=0;i<arch[l].inp_d;i++) delete[] mf_c[l][a][i];
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") for(int a=0;a<arch[l].out_d;a++) delete[] mf_c[l][a];
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") delete[] mf_c[l];
-            delete[] mf_c;
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") for(int a=0;a<arch[l].out_d;a++) for(int i=0;i<arch[l].inp_d;i++) for(int j=0;j<arch[l].f_v;j++) delete[] vf_c[l][a][i][j];
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") for(int a=0;a<arch[l].out_d;a++) for(int i=0;i<arch[l].inp_d;i++) delete[] vf_c[l][a][i];
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") for(int a=0;a<arch[l].out_d;a++) delete[] vf_c[l][a];
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") delete[] vf_c[l];
-            delete[] vf_c;
-
-            for(int l=0;l<num_of_conv;l++) delete[] jb_c[l];
-            delete[] jb_c;
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") delete[] mb_c[l];
-            delete[] mb_c;
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") delete[] vb_c[l];
-            delete[] vb_c;
-
-            for(int i=0;i<depth-num_of_conv;i++) for(int j=0;j<arch[i+num_of_conv].n_out;j++) delete[] jw_d[i][j];
-            for(int i=0;i<depth-num_of_conv;i++) delete[] jw_d[i];
-            delete[] jw_d;
-            for(int i=0;i<depth-num_of_conv;i++) for(int j=0;j<arch[i+num_of_conv].n_out;j++) delete[] mw_d[i][j];
-            for(int i=0;i<depth-num_of_conv;i++) delete[] mw_d[i];
-            delete[] mw_d;
-            for(int i=0;i<depth-num_of_conv;i++) for(int j=0;j<arch[i+num_of_conv].n_out;j++) delete[] vw_d[i][j];
-            for(int i=0;i<depth-num_of_conv;i++) delete[] vw_d[i];
-            delete[] vw_d;
-
-            for(int i=0;i<depth-num_of_conv;i++) delete[] jb_d[i];
-            delete[] jb_d;
-            for(int i=0;i<depth-num_of_conv;i++) delete[] mb_d[i];
-            delete[] mb_d;
-            for(int i=0;i<depth-num_of_conv;i++) delete[] vb_d[i];
-            delete[] vb_d;
-        }
-        void randomize(double scale = 1){ // randomizes weights and biases
-            for(int i=0;i<depth;i++) arch[i].randomize(scale);
-        }
-        void forward(double * input){ // performs forward pass, with rank-1 input (fully connected networks only)
-            if(num_of_conv != 0){
-                cerr << "Error: input to conv layer must be a rank-3 array.\n";
-                assert(false);
-            }
-            arch[0].forward(input);
-            for(int i=1;i<depth+softmaxQ;i++) arch[i].forward(arch[i-1].p_d);
-        }
-        void forward(double ** input){ // performs forward pass, with rank-3 input, depth = 1
-            if(num_of_conv == 0){
-                if(input_size_h*input_size_v == 0) cerr << "Error: cannot read rank-3 data without size information!\n";
-                assert(input_size_h*input_size_v > 0);
-                for(int i=0;i<input_size_dense;i++) flatten[i] = input[(i-i%input_size_h)/input_size_h % input_size_v][i%input_size_h];
-            }
-            else{
-                arch[0].forward(input);
-                for(int i=1;i<num_of_conv;i++) arch[i].forward(arch[i-1].p_c);
-                for(int i=0;i<input_size_dense;i++) flatten[i] = arch[num_of_conv-1].p_c[(i-((i-i%output_size_h)/output_size_h % output_size_v))/(output_size_h*output_size_v)][(i-i%output_size_h)/output_size_h % output_size_v][i%output_size_h]; //a=output_size_v*output_size_h*i+ output_size_h*j+k
-            }
-            arch[num_of_conv].forward(flatten);
-            for(int i=num_of_conv+1;i<depth+softmaxQ;i++) arch[i].forward(arch[i-1].p_d);
-        }
-        void forward(double *** input){ // performs forward pass, with rank-3 input
-            if(num_of_conv == 0){
-                if(input_size_h*input_size_v*input_size_d == 0) cerr << "Error: cannot read rank-3 data without size information!\n";
-                assert(input_size_h*input_size_v*input_size_d > 0);
-                for(int i=0;i<input_size_dense;i++) flatten[i] = input[(i-((i-i%input_size_h)/input_size_h % input_size_v))/(input_size_h*input_size_v)][(i-i%input_size_h)/input_size_h % input_size_v][i%input_size_h];
-            }
-            else{
-                arch[0].forward(input);
-                for(int i=1;i<num_of_conv;i++) arch[i].forward(arch[i-1].p_c);
-                for(int i=0;i<input_size_dense;i++) flatten[i] = arch[num_of_conv-1].p_c[(i-((i-i%output_size_h)/output_size_h % output_size_v))/(output_size_h*output_size_v)][(i-i%output_size_h)/output_size_h % output_size_v][i%output_size_h]; //a=output_size_v*output_size_h*i+ output_size_h*j+k
-            }
-            arch[num_of_conv].forward(flatten);
-            for(int i=num_of_conv+1;i<depth+softmaxQ;i++) arch[i].forward(arch[i-1].p_d);
-
-        }
-        double cost(double **** x, double ** y, int sample_size){ // computes C = sum_s loss(x[s],y[s])
-            double C = 0;
-            for(int s=0;s<sample_size;s++){
-                forward(x[s]);
-                for(int a=0;a<output_size_dense;a++) C += loss_fnc.f(arch[depth-1+softmaxQ].p_d[a],y[s][a])/(sample_size*output_size_dense);
-            }
-            return C;
-        }
-        double cost(double *** x, double ** y, int sample_size){
-            double C = 0;
-            for(int s=0;s<sample_size;s++){
-                forward(x[s]);
-                for(int a=0;a<output_size_dense;a++) C += loss_fnc.f(arch[depth-1+softmaxQ].p_d[a],y[s][a])/(sample_size*output_size_dense);
-            }
-            return C;
-        }
-        double cost(double ** x, double ** y, int sample_size){
-            if(num_of_conv != 0){
-                cerr << "Error: input to conv layer must be a rank-3 array.\n";
-                assert(false);
-            }
-            double C = 0;
-            for(int s=0;s<sample_size;s++){
-                forward(x[s]);
-                for(int a=0;a<output_size_dense;a++) C += loss_fnc.f(arch[depth-1+softmaxQ].p_d[a],y[s][a])/(sample_size*output_size_dense);
-            }
-            return C;
-        }
-
-        void train(double **** x, double ** y, int sample_size, int batch_size, double LR, int epochs, bool prog_bar = true){ // trains network, using rank-3 input
-            // TODO: option to shuffle mini batches
-
-            if(sample_size % batch_size !=0) cerr << "warning, mini-batches don't fit!\n";
-
-            cout << "Training parameters:\n-Number of samples: " << sample_size << "\n-Size of mini-batch: " << batch_size << "\n-Learning rate: " << LR << "\n-Number of epochs: " << epochs << endl;
-
-            double C; // estimate of cost
-            //cout << "[training; initial cost = ";
-            //cout.flush();
-            //cout << cost(x,y,sample_size) << "]" << endl;
-            cout << "[training...]" << endl;
-            double beta1, beta2;
-            beta1 = adam_b1, beta2 = adam_b2;
-            set_mv_to_zero(); // this and previous line: apparently, inside `ep` loop works better if `epochs` is small...
-
-            for(int ep=0;ep<epochs;ep++){
-                //cout << " " << cost(x,y,sample_size) << ",";
-                //cout.flush();
-                //if(prog_bar) {progress_bar_before(ep,epochs+1,40); cout.flush();}
-                C = 0;
-                for(int t=0;t<sample_size/batch_size;t++){
-                    if(prog_bar) {progress_bar_before(t,sample_size/batch_size+1,80); cout.flush();}
-                    set_j_to_zero();
-                    for(int u=0;u<batch_size;u++){
-                        forward(x[t*batch_size+u]);
-                        update_derivatives(x[t*batch_size+u],y[t*batch_size+u],batch_size*output_size_dense);
-                        for(int a=0;a<output_size_dense;a++) C += loss_fnc.f(arch[depth-1+softmaxQ].p_d[a],y[t*batch_size+u][a])/(sample_size*output_size_dense);
-                    }
-                    run_adam(beta1,beta2,LR);
-                    if(prog_bar) progress_bar_after(t,sample_size/batch_size+1,80);
-                }
-                if(prog_bar) cout << " cost = " << C << endl;
-
-                //if(prog_bar) {progress_bar_after(ep,epochs+1,40); cout.flush();}
-            }
-            cout << "[done; final cost = " << C << "]" << endl;
-        }
-        void train(double *** x, double ** y, int sample_size, int batch_size, double LR, int epochs, bool prog_bar = true){ // trains network, using rank-3 input, depth = 1
-            assert(input_size_d == 1);
-            if(sample_size % batch_size !=0) cerr << "warning, mini-batches don't fit!\n";
-
-            cout << "Training parameters:\n-Number of samples: " << sample_size << "\n-Size of mini-batch: " << batch_size << "\n-Learning rate: " << LR << "\n-Number of epochs: " << epochs << endl;
-
-            double C; // estimate of cost
-            //cout << "[training; initial cost = ";
-            //cout.flush();
-            //cout << cost(x,y,sample_size) << "]" << endl;
-            cout << "[training...]" << endl;
-            double beta1, beta2;
-            beta1 = adam_b1, beta2 = adam_b2;
-            set_mv_to_zero(); // this and previous line: apparently, inside `ep` loop works better if `epochs` is small...
-
-            for(int ep=0;ep<epochs;ep++){
-                //cout << " " << cost(x,y,sample_size) << ",";
-                //cout.flush();
-                //if(prog_bar) {progress_bar_before(ep,epochs+1,40); cout.flush();}
-                C = 0;
-                for(int t=0;t<sample_size/batch_size;t++){
-                    if(prog_bar) {progress_bar_before(t,sample_size/batch_size+1,80); cout.flush();}
-                    set_j_to_zero();
-                    for(int u=0;u<batch_size;u++){
-                        forward(x[t*batch_size+u]);
-                        update_derivatives(x[t*batch_size+u],y[t*batch_size+u],batch_size*output_size_dense);
-                        for(int a=0;a<output_size_dense;a++) C += loss_fnc.f(arch[depth-1+softmaxQ].p_d[a],y[t*batch_size+u][a])/(sample_size*output_size_dense);
-                    }
-                    run_adam(beta1,beta2,LR);
-                    if(prog_bar) progress_bar_after(t,sample_size/batch_size+1,80);
-                }
-                if(prog_bar) cout << " cost = " << C << endl;
-
-                //if(prog_bar) {progress_bar_after(ep,epochs+1,40); cout.flush();}
-            }
-            cout << "[done; final cost = " << C << "]" << endl;
-        }
-        void train(double ** x, double ** y, int sample_size, int batch_size, double LR, int epochs, bool prog_bar = true){ // trains network, using rank-1 input
-            if(num_of_conv != 0){
-                cerr << "Error: input to conv layer must be a rank-3 array.\n";
-                assert(false);
-            }
-
-            if(sample_size % batch_size !=0) cerr << "warning, mini-batches don't fit!\n";
-
-            cout << "Training parameters:\n-Number of samples: " << sample_size << "\n-Size of mini-batch: " << batch_size << "\n-Learning rate: " << LR << "\n-Number of epochs: " << epochs << endl;
-
-            double C; // estimate of cost
-            //cout << "[training; initial cost = ";
-            //cout.flush();
-            //cout << cost(x,y,sample_size) << "]" << endl;
-            cout << "[training...]" << endl;
-            double beta1, beta2;
-            beta1 = adam_b1, beta2 = adam_b2;
-            set_mv_to_zero(); // this and previous line: apparently, inside `ep` loop works better if `epochs` is small...
-
-            for(int ep=0;ep<epochs;ep++){
-                //cout << " " << cost(x,y,sample_size) << ",";
-                //cout.flush();
-                //if(prog_bar) {progress_bar_before(ep,epochs+1,40); cout.flush();}
-                C = 0;
-                for(int t=0;t<sample_size/batch_size;t++){
-                    if(prog_bar) {progress_bar_before(t,sample_size/batch_size+1,80); cout.flush();}
-                    set_j_to_zero();
-                    for(int u=0;u<batch_size;u++){
-                        forward(x[t*batch_size+u]);
-                        update_derivatives(x[t*batch_size+u],y[t*batch_size+u],batch_size*output_size_dense);
-                        for(int a=0;a<output_size_dense;a++) C += loss_fnc.f(arch[depth-1+softmaxQ].p_d[a],y[t*batch_size+u][a])/(sample_size*output_size_dense);
-                    }
-                    run_adam(beta1,beta2,LR);
-                    if(prog_bar) progress_bar_after(t,sample_size/batch_size+1,80);
-                }
-                if(prog_bar) cout << " cost = " << C << endl;
-
-                //if(prog_bar) {progress_bar_after(ep,epochs+1,40); cout.flush();}
-            }
-            cout << "[done; final cost = " << C << "]" << endl;
-        }
-
-        void print_to_file(string filename = ""){ // prints weights and biases to textfile
-            string name_of_file;
-            if(filename == "") name_of_file = "nn_data_"+to_string(input_size_d)+"_"+to_string(input_size_v)+"_"+to_string(input_size_h)+"_"+to_string(output_size_dense)+".txt";
-            else name_of_file = filename;
-            ofstream myfile;
-            myfile.open(name_of_file);
-            assert(myfile);
-
-            for(int l=0;l<num_of_conv;l++){
-                if(arch[l].type == "conv"){
-                    for(int i=0;i<arch[l].out_d;i++){
-                        for(int a=0;a<arch[l].inp_d;a++){
-                            for(int b=0;b<arch[l].f_v;b++){
-                                for(int c=0;c<arch[l].f_h;c++){
-                                    myfile << arch[l].filter[i][a][b][c] << ",\n";
-                                }
-                            }
-                        }
-                        myfile << arch[l].biases[i] << ",\n";
-                    }
-                }
-            }
-            for(int l=num_of_conv;l<depth;l++){
-                for(int alpha=0;alpha<arch[l].n_out;alpha++){
-                    for(int beta=0;beta<arch[l].n_in;beta++){
-                        myfile << arch[l].weights[alpha][beta] << ",\n";
-                    }
-                    myfile << arch[l].biases[alpha] << ",\n";
-                }
-            }
-            myfile.close();
-        }
-        void read_from_file(string filename = ""){ // loads weights and biases from textfile
-            string name_of_file, str;
-            if(filename == "") name_of_file = "nn_data_"+to_string(input_size_d)+"_"+to_string(input_size_v)+"_"+to_string(input_size_h)+"_"+to_string(output_size_dense)+".txt";
-            else name_of_file = filename;
-            ifstream myfile;
-            myfile.open(name_of_file);
-            assert(myfile);
-
-            for(int l=0;l<num_of_conv;l++){
-                if(arch[l].type == "conv"){
-                    for(int i=0;i<arch[l].out_d;i++){
-                        for(int a=0;a<arch[l].inp_d;a++){
-                            for(int b=0;b<arch[l].f_v;b++){
-                                for(int c=0;c<arch[l].f_h;c++){
-                                    getline(myfile, str, ',');
-                                    arch[l].filter[i][a][b][c] = stod(str);
-                                }
-                            }
-                        }
-                        getline(myfile, str, ',');
-                        arch[l].biases[i] = stod(str);
-                    }
-                }
-            }
-            for(int l=num_of_conv;l<depth;l++){
-                for(int alpha=0;alpha<arch[l].n_out;alpha++){
-                    for(int beta=0;beta<arch[l].n_in;beta++){
-                        getline(myfile, str, ',');
-                        arch[l].weights[alpha][beta] = stod(str);
-                    }
-                    getline(myfile, str, ',');
-                    arch[l].biases[alpha] = stod(str);
-                }
-            }
-            myfile.close();
-        }
-
-        friend ostream& operator<<(ostream& os, const network& netw){ //prints network details to stream
-            os << "==========================================================================\n";
-            int n_param = 0;
-            if(netw.num_of_conv > 0){
-                for(int l=0;l<netw.num_of_conv;l++) if(netw.arch[l].get_type() == "conv") n_param += netw.arch[l].get_numb_of_out_channels() + netw.arch[l].get_numb_of_out_channels()*netw.arch[l].get_numb_of_inp_channels()*netw.arch[l].get_filter_size('v')*netw.arch[l].get_filter_size('h');
-                os << "Convolutional layers: [Input size: " << netw.input_size_d << "x" << netw.input_size_v << "x" <<netw.input_size_h << ", Output size: " << netw.output_size_d << "x" << netw.output_size_v << "x" << netw.output_size_h;
-                os << ", Number of parameters: " << n_param <<"]\n";
-                for(int i=0;i<netw.num_of_conv;i++){
-                    switch(i){
-                    case 0: os << "first layer:\n"; break;
-                    case 1: os << "second layer:\n"; break;
-                    case 2: os << "third layer:\n"; break;
-                    default: os << i+1 << "th layer:\n";
-                    }
-                    if(netw.arch[i].activ.name.size() > 0 && netw.arch[i].get_type() == "conv") os << "activation: " << netw.arch[i].activ.name << endl;
-                    os << netw.arch[i] << (i<netw.num_of_conv-1 ? "\n\n" : "");
-                }
-                os << "--------------------------------------------------------------------------\n";
-            }
-            n_param = 0;
-            for(int i=netw.num_of_conv;i<netw.depth;i++) n_param += netw.arch[i].get_numb_of_out_neurons() + netw.arch[i].get_numb_of_inp_neurons()*netw.arch[i].get_numb_of_out_neurons();
-            os << "Dense layers: [Input size: " << netw.input_size_dense << ", Output size: " << netw.output_size_dense;
-            os << ", Number of parameters: " << n_param << "]\n";
-            for(int i=netw.num_of_conv;i<netw.depth;i++){
-                switch(i-netw.num_of_conv){
-                case 0: os << "first layer:\n"; break;
-                case 1: os << "second layer:\n"; break;
-                case 2: os << "third layer:\n"; break;
-                default: os << i+1 << "th layer:\n";
-                }
-                if(netw.arch[i].activ.name.size() > 0) os << "activation: " << netw.arch[i].activ.name << endl;
-                os << netw.arch[i] << (i<netw.depth-1 ? "\n" : "");
-            }
-            if(netw.softmaxQ) os << "\nFinal layer: Soft-max.\n";
-
-            os << "==========================================================================\n";
-            return os;
-        }
-
-        layer & operator [](int i){
-            assert(i >= 0 && i < depth+softmaxQ);
-            return arch[i];
-        }
-
-    //private:
-        int depth = 0; // number of layers, not counting softmax (if it appears at all)
-        int input_size_v = 0, input_size_h = 0, input_size_d = 0; // for conv
-        int output_size_v, output_size_h, output_size_d; // for conv
-        int input_size_dense, output_size_dense; // for dense
-        layer * arch; // architecture i.e., list of layers
-
-        bool softmaxQ = false; // is there a softmax layer or not
-        int num_of_conv = 0; // number of conv layers
-        double * flatten; // flatten rank-3 into linear array
-        double ** Xi_d; // d(cost)/d(bias), for dense layers, for a single sample
-        double **** Xi_c; // d(cost)/d(bias), for conv layers, for a single sample
-
-        double ***** jf_c; // d(cost)/d(filter) for conv
-        double ***** mf_c; // for momentum
-        double ***** vf_c; // for adam
-
-        double ** jb_c; // d(cost)/d(bias) for conv
-        double ** mb_c; // for momentum
-        double ** vb_c; // for adam
-
-        double *** jw_d; // d(cost)/d(weight) for dense
-        double *** mw_d; // for momentum
-        double *** vw_d; // for adam
-
-        double ** jb_d; // d(cost)/d(bias) for dense
-        double ** mb_d; // for momentum
-        double ** vb_d; // for adam
-
-        void update_derivatives(double * x, double * y, double scale){
-            double aux, tot;
-            if(softmaxQ){
-                tot = 0;
-                for(int alpha=0;alpha<output_size_dense;alpha++) tot += arch[depth].p_d[alpha]*loss_fnc.df(arch[depth].p_d[alpha],y[alpha]);
-                for(int beta=0;beta<output_size_dense;beta++) Xi_d[depth-1][beta] = arch[depth].p_d[beta]*arch[depth-1].q_d[beta]*(loss_fnc.df(arch[depth].p_d[beta],y[beta])-tot);
-            }
-            else for(int beta=0;beta<output_size_dense;beta++) Xi_d[depth-1][beta] = arch[depth-1].q_d[beta]*loss_fnc.df(arch[depth-1].p_d[beta],y[beta]);
-
-            for(int l=depth-2;l>=0;l--){
-                for(int beta=0;beta<arch[l].n_out;beta++){
-                    aux = 0;
-                    for(int gamma=0;gamma<arch[l+1].n_out;gamma++) aux += arch[l+1].weights[gamma][beta]*Xi_d[l+1][gamma];
-                    Xi_d[l][beta] = arch[l].q_d[beta]*aux;
-                }
-            }
-            for(int l=0;l<depth;l++) for(int i=0;i<arch[l].n_out;i++) jb_d[l][i] += Xi_d[l][i]/scale;
-            for(int l=0;l<depth;l++) for(int i=0;i<arch[l].n_out;i++) for(int j=0;j<arch[l].n_in;j++) jw_d[l][i][j] += Xi_d[l][i]*( (l==0) ? x[j] : arch[l-1].p_d[j] )/scale;
-
-        }
-        void update_derivatives(double ** x, double * y, double scale){
-            double aux, tot;
-            if(softmaxQ){
-                tot = 0;
-                for(int alpha=0;alpha<output_size_dense;alpha++) tot += arch[depth].p_d[alpha]*loss_fnc.df(arch[depth].p_d[alpha],y[alpha]);
-                for(int beta=0;beta<output_size_dense;beta++) Xi_d[depth-num_of_conv-1][beta] = arch[depth].p_d[beta]*arch[depth-1].q_d[beta]*(loss_fnc.df(arch[depth].p_d[beta],y[beta])-tot);
-            }
-            else for(int beta=0;beta<output_size_dense;beta++) Xi_d[depth-num_of_conv-1][beta] = arch[depth-1].q_d[beta]*loss_fnc.df(arch[depth-1].p_d[beta],y[beta]);
-
-            for(int l=depth-num_of_conv-2;l>=0;l--){
-                for(int beta=0;beta<arch[l+num_of_conv].n_out;beta++){
-                    aux = 0;
-                    for(int gamma=0;gamma<arch[l+num_of_conv+1].n_out;gamma++) aux += arch[l+num_of_conv+1].weights[gamma][beta]*Xi_d[l+1][gamma];
-                    Xi_d[l][beta] = arch[l+num_of_conv].q_d[beta]*aux;
-                }
-            }
-            if(num_of_conv > 0){
-                for(int i=0;i<output_size_d;i++){
-                    for(int j=0;j<output_size_v;j++){
-                        for(int k=0;k<output_size_h;k++){
-                            aux = 0;
-                            for(int beta=0;beta<arch[num_of_conv].n_out;beta++) aux += Xi_d[0][beta]*arch[num_of_conv].weights[beta][output_size_v*output_size_h*i+output_size_h*j+k];
-                            Xi_c[num_of_conv-1][i][j][k] = aux*arch[num_of_conv-1].q_c[i][j][k];
-                        }
-                    }
-                }
-
-                int minbb, maxbb, mincc, maxcc, sol_b, sol_c;
-                bool found_sol;
-                for(int l=num_of_conv-2;l>=0;l--){
-                    if(arch[l].type == "maxpool") continue;
-                    if(arch[l+1].type == "maxpool"){
-                        for(int i=0;i<arch[l].out_d;i++){
-                            for(int j=0;j<arch[l].out_v;j++){
-                                for(int k=0;k<arch[l].out_h;k++){
-                                    aux = 0;
-                                    found_sol = false;
-                                    for(int b=0;b<arch[l+1].out_v && !found_sol;b++){
-                                        for(int c=0;c<arch[l+1].out_h;c++){
-                                            if(arch[l+1].mp_v[i][b][c] == j && arch[l+1].mp_h[i][b][c] == k){
-                                                sol_b = b;
-                                                sol_c = c;
-                                                found_sol = true;
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    if(found_sol){
-                                        minbb = max(0,(sol_b-arch[l+2].f_v+arch[l+2].stride_v)/arch[l+2].stride_v);
-                                        maxbb = min(sol_b/arch[l+2].stride_v,arch[l+2].out_v-1);
-                                        mincc = max(0,(sol_c-arch[l+2].f_h+arch[l+2].stride_h)/arch[l+1].stride_h);
-                                        maxcc = min(sol_c/arch[l+2].stride_h,arch[l+2].out_h-1);
-                                        for(int aa=0;aa<arch[l+2].out_d;aa++) for(int bb=minbb;bb<=maxbb;bb++) for(int cc=mincc;cc<=maxcc;cc++) aux += Xi_c[l+2][aa][bb][cc]*arch[l+2].filter[aa][i][sol_b-bb*arch[l+1].stride_v][sol_c-cc*arch[l+1].stride_h];
-                                    }
-                                    Xi_c[l][i][j][k] = aux*arch[l].q_c[i][j][k];
-                                }
-                            }
-                        }
-                    }
-                    else{
-                        for(int j=0;j<arch[l].out_v;j++){
-                            minbb = max(0,(j-arch[l+1].f_v+arch[l+1].stride_v)/arch[l+1].stride_v);
-                            maxbb = min(j/arch[l+1].stride_v,arch[l+1].out_v-1);
-                            for(int k=0;k<arch[l].out_h;k++){
-                                mincc = max(0,(k-arch[l+1].f_h+arch[l+1].stride_h)/arch[l+1].stride_h);
-                                maxcc = min(k/arch[l+1].stride_h,arch[l+1].out_h-1);
-                                for(int i=0;i<arch[l].out_d;i++){
-                                    aux = 0;
-                                    for(int aa=0;aa<arch[l+1].out_d;aa++)
-                                        for(int bb=minbb;bb<=maxbb;bb++)
-                                            for(int cc=mincc;cc<=maxcc;cc++)
-                                                aux += Xi_c[l+1][aa][bb][cc]*arch[l+1].filter[aa][i][j-bb*arch[l+1].stride_v][k-cc*arch[l+1].stride_h];
-                                    Xi_c[l][i][j][k] = aux*arch[l].q_c[i][j][k];
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            for(int l=0;l<depth-num_of_conv;l++) for(int i=0;i<arch[l+num_of_conv].n_out;i++) jb_d[l][i] += Xi_d[l][i]/scale;
-            for(int l=0;l<depth-num_of_conv;l++) for(int i=0;i<arch[l+num_of_conv].n_out;i++) for(int j=0;j<arch[l+num_of_conv].n_in;j++) jw_d[l][i][j] += Xi_d[l][i]*( (l==0) ? flatten[j] : arch[l+num_of_conv-1].p_d[j] )/scale;
-
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") for(int i=0;i<arch[l].out_d;i++) for(int j=0;j<arch[l].out_v;j++) for(int k=0;k<arch[l].out_h;k++) jb_c[l][i] += Xi_c[l][i][j][k]/scale;
-            for(int l=0;l<num_of_conv;l++)
-                if(arch[l].type == "conv")
-                    for(int i=0;i<arch[l].out_d;i++)
-                        for(int j=0;j<arch[l].out_v;j++)
-                            for(int k=0;k<arch[l].out_h;k++)
-                                for(int a=0;a<arch[l].inp_d;a++)
-                                    for(int b=0;b<arch[l].f_v;b++) for(int c=0;c<arch[l].f_h;c++) jf_c[l][i][a][b][c] += Xi_c[l][i][j][k]*(l==0 ? x[b+j*arch[l].stride_v][c+k*arch[l].stride_h] : arch[l-1].p_c[a][b+j*arch[l].stride_v][c+k*arch[l].stride_h] )/scale;
-
-        }
-        void update_derivatives(double *** x, double * y, double scale){
-            double aux, tot;
-            if(softmaxQ){
-                tot = 0;
-                for(int alpha=0;alpha<output_size_dense;alpha++) tot += arch[depth].p_d[alpha]*loss_fnc.df(arch[depth].p_d[alpha],y[alpha]);
-                for(int beta=0;beta<output_size_dense;beta++) Xi_d[depth-num_of_conv-1][beta] = arch[depth].p_d[beta]*arch[depth-1].q_d[beta]*(loss_fnc.df(arch[depth].p_d[beta],y[beta])-tot);
-            }
-            else for(int beta=0;beta<output_size_dense;beta++) Xi_d[depth-num_of_conv-1][beta] = arch[depth-1].q_d[beta]*loss_fnc.df(arch[depth-1].p_d[beta],y[beta]);
-
-            for(int l=depth-num_of_conv-2;l>=0;l--){
-                for(int beta=0;beta<arch[l+num_of_conv].n_out;beta++){
-                    aux = 0;
-                    for(int gamma=0;gamma<arch[l+num_of_conv+1].n_out;gamma++) aux += arch[l+num_of_conv+1].weights[gamma][beta]*Xi_d[l+1][gamma];
-                    Xi_d[l][beta] = arch[l+num_of_conv].q_d[beta]*aux;
-                }
-            }
-            if(num_of_conv > 0){
-                for(int i=0;i<output_size_d;i++){
-                    for(int j=0;j<output_size_v;j++){
-                        for(int k=0;k<output_size_h;k++){
-                            aux = 0;
-                            for(int beta=0;beta<arch[num_of_conv].n_out;beta++) aux += Xi_d[0][beta]*arch[num_of_conv].weights[beta][output_size_v*output_size_h*i+output_size_h*j+k];
-                            Xi_c[num_of_conv-1][i][j][k] = aux*arch[num_of_conv-1].q_c[i][j][k];
-                        }
-                    }
-                }
-
-                int minbb, maxbb, mincc, maxcc, sol_b, sol_c;
-                bool found_sol;
-                for(int l=num_of_conv-2;l>=0;l--){
-                    if(arch[l].type == "maxpool") continue;
-                    if(arch[l+1].type == "maxpool"){
-                        for(int i=0;i<arch[l].out_d;i++){
-                            for(int j=0;j<arch[l].out_v;j++){
-                                for(int k=0;k<arch[l].out_h;k++){
-                                    aux = 0;
-                                    found_sol = false;
-                                    for(int b=0;b<arch[l+1].out_v && !found_sol;b++){
-                                        for(int c=0;c<arch[l+1].out_h;c++){
-                                            if(arch[l+1].mp_v[i][b][c] == j && arch[l+1].mp_h[i][b][c] == k){
-                                                sol_b = b;
-                                                sol_c = c;
-                                                found_sol = true;
-                                                break;
-                                            }
-                                        }
-                                    }
-                                    if(found_sol){
-                                        minbb = max(0,(sol_b-arch[l+2].f_v+arch[l+2].stride_v)/arch[l+2].stride_v);
-                                        maxbb = min(sol_b/arch[l+2].stride_v,arch[l+2].out_v-1);
-                                        mincc = max(0,(sol_c-arch[l+2].f_h+arch[l+2].stride_h)/arch[l+1].stride_h);
-                                        maxcc = min(sol_c/arch[l+2].stride_h,arch[l+2].out_h-1);
-                                        for(int aa=0;aa<arch[l+2].out_d;aa++) for(int bb=minbb;bb<=maxbb;bb++) for(int cc=mincc;cc<=maxcc;cc++) aux += Xi_c[l+2][aa][bb][cc]*arch[l+2].filter[aa][i][sol_b-bb*arch[l+1].stride_v][sol_c-cc*arch[l+1].stride_h];
-                                    }
-                                    Xi_c[l][i][j][k] = aux*arch[l].q_c[i][j][k];
-                                }
-                            }
-                        }
-                    }
-                    else{
-                        for(int j=0;j<arch[l].out_v;j++){
-                            minbb = max(0,(j-arch[l+1].f_v+arch[l+1].stride_v)/arch[l+1].stride_v);
-                            maxbb = min(j/arch[l+1].stride_v,arch[l+1].out_v-1);
-                            for(int k=0;k<arch[l].out_h;k++){
-                                mincc = max(0,(k-arch[l+1].f_h+arch[l+1].stride_h)/arch[l+1].stride_h);
-                                maxcc = min(k/arch[l+1].stride_h,arch[l+1].out_h-1);
-                                for(int i=0;i<arch[l].out_d;i++){
-                                    aux = 0;
-                                    for(int aa=0;aa<arch[l+1].out_d;aa++)
-                                        for(int bb=minbb;bb<=maxbb;bb++)
-                                            for(int cc=mincc;cc<=maxcc;cc++)
-                                                aux += Xi_c[l+1][aa][bb][cc]*arch[l+1].filter[aa][i][j-bb*arch[l+1].stride_v][k-cc*arch[l+1].stride_h];
-                                    Xi_c[l][i][j][k] = aux*arch[l].q_c[i][j][k];
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            for(int l=0;l<depth-num_of_conv;l++) for(int i=0;i<arch[l+num_of_conv].n_out;i++) jb_d[l][i] += Xi_d[l][i]/scale;
-            for(int l=0;l<depth-num_of_conv;l++) for(int i=0;i<arch[l+num_of_conv].n_out;i++) for(int j=0;j<arch[l+num_of_conv].n_in;j++) jw_d[l][i][j] += Xi_d[l][i]*( (l==0) ? flatten[j] : arch[l+num_of_conv-1].p_d[j] )/scale;
-
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") for(int i=0;i<arch[l].out_d;i++) for(int j=0;j<arch[l].out_v;j++) for(int k=0;k<arch[l].out_h;k++) jb_c[l][i] += Xi_c[l][i][j][k]/scale;
-            for(int l=0;l<num_of_conv;l++)
-                if(arch[l].type == "conv")
-                    for(int i=0;i<arch[l].out_d;i++)
-                        for(int j=0;j<arch[l].out_v;j++)
-                            for(int k=0;k<arch[l].out_h;k++)
-                                for(int a=0;a<arch[l].inp_d;a++)
-                                    for(int b=0;b<arch[l].f_v;b++) for(int c=0;c<arch[l].f_h;c++) jf_c[l][i][a][b][c] += Xi_c[l][i][j][k]*(l==0 ? x[a][b+j*arch[l].stride_v][c+k*arch[l].stride_h] : arch[l-1].p_c[a][b+j*arch[l].stride_v][c+k*arch[l].stride_h] )/scale;
-
-        }
-
-        void set_mv_to_zero(){ // sets Adam parameters m_t and v_t to zero, for all layers
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") for(int a=0;a<arch[l].out_d;a++) for(int i=0;i<arch[l].inp_d;i++) for(int j=0;j<arch[l].f_v;j++) for(int k=0;k<arch[l].f_h;k++) mf_c[l][a][i][j][k] = 0;
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") for(int a=0;a<arch[l].out_d;a++) for(int i=0;i<arch[l].inp_d;i++) for(int j=0;j<arch[l].f_v;j++) for(int k=0;k<arch[l].f_h;k++) vf_c[l][a][i][j][k] = 0;
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") for(int a=0;a<arch[l].out_d;a++) mb_c[l][a] = 0;
-            for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") for(int a=0;a<arch[l].out_d;a++) vb_c[l][a] = 0;
-            for(int i=0;i<depth-num_of_conv;i++) for(int j=0;j<arch[i+num_of_conv].n_out;j++) for(int k=0;k<arch[i+num_of_conv].n_in;k++) mw_d[i][j][k] = 0;
-            for(int i=0;i<depth-num_of_conv;i++) for(int j=0;j<arch[i+num_of_conv].n_out;j++) for(int k=0;k<arch[i+num_of_conv].n_in;k++) vw_d[i][j][k] = 0;
-            for(int i=0;i<depth-num_of_conv;i++) for(int j=0;j<arch[i+num_of_conv].n_out;j++) mb_d[i][j] = 0;
-            for(int i=0;i<depth-num_of_conv;i++) for(int j=0;j<arch[i+num_of_conv].n_out;j++) vb_d[i][j] = 0;
-        }
-        void set_j_to_zero(){ // sets all d(cost)/d(parameter) to zero
-                for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") for(int a=0;a<arch[l].out_d;a++) for(int i=0;i<arch[l].inp_d;i++) for(int j=0;j<arch[l].f_v;j++) for(int k=0;k<arch[l].f_h;k++) jf_c[l][a][i][j][k] = 0;
-                for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") for(int a=0;a<arch[l].out_d;a++) jb_c[l][a] = 0;
-                for(int i=0;i<depth-num_of_conv;i++) for(int j=0;j<arch[i+num_of_conv].n_out;j++) for(int k=0;k<arch[i+num_of_conv].n_in;k++) jw_d[i][j][k] = 0;
-                for(int i=0;i<depth-num_of_conv;i++) for(int j=0;j<arch[i+num_of_conv].n_out;j++) jb_d[i][j] = 0;
-        }
-        void run_adam(double & beta1, double & beta2, double LR){ // runs Adam for a single iteration
-            for(int l=0;l<num_of_conv;l++){
-                if(arch[l].type == "conv"){
-                    for(int a=0;a<arch[l].out_d;a++){
-                        for(int i=0;i<arch[l].inp_d;i++){
-                            for(int j=0;j<arch[l].f_v;j++){
-                                for(int k=0;k<arch[l].f_h;k++){
-                                    mf_c[l][a][i][j][k] = adam_b1*mf_c[l][a][i][j][k]+(1-adam_b1)*jf_c[l][a][i][j][k];
-                                    vf_c[l][a][i][j][k] = adam_b2*vf_c[l][a][i][j][k]+(1-adam_b2)*jf_c[l][a][i][j][k]*jf_c[l][a][i][j][k];
-                                    arch[l].filter[a][i][j][k] -= LR*(mf_c[l][a][i][j][k]/(1-beta1))/(sqrt((vf_c[l][a][i][j][k])/(1-beta2))+.000000001);;
-                                }
-                            }
-                        }
-                        mb_c[l][a] = adam_b1*mb_c[l][a]+(1-adam_b1)*jb_c[l][a];
-                        vb_c[l][a] = adam_b2*vb_c[l][a]+(1-adam_b2)*jb_c[l][a]*jb_c[l][a];
-                        arch[l].biases[a] -= LR*(mb_c[l][a]/(1-beta1))/(sqrt((vb_c[l][a])/(1-beta2))+.000000001);;
-                    }
-                }
-            }
-            for(int l=0;l<depth-num_of_conv;l++){
-                for(int b=0;b<arch[l+num_of_conv].n_out;b++){
-                    for(int c=0;c<arch[l+num_of_conv].n_in;c++){
-                        mw_d[l][b][c] = adam_b1*mw_d[l][b][c]+(1-adam_b1)*jw_d[l][b][c];
-                        vw_d[l][b][c] = adam_b2*vw_d[l][b][c]+(1-adam_b2)*jw_d[l][b][c]*jw_d[l][b][c];
-                        arch[l+num_of_conv].weights[b][c] -= LR*(mw_d[l][b][c]/(1-beta1))/(sqrt((vw_d[l][b][c])/(1-beta2))+.000000001);
-                    }
-                    mb_d[l][b] = adam_b1*mb_d[l][b]+(1-adam_b1)*jb_d[l][b];
-                    vb_d[l][b] = adam_b2*vb_d[l][b]+(1-adam_b2)*jb_d[l][b]*jb_d[l][b];
-                    arch[l+num_of_conv].biases[b] -= LR*(mb_d[l][b]/(1-beta1))/(sqrt((vb_d[l][b])/(1-beta2))+.000000001);
-                }
-            }
-            beta1 *= adam_b1; beta2 *= adam_b2;
-
-            // for(int l=0;l<depth;l++){
-            //     for(int b=0;b<arch[l].n_out;b++){
-            //         for(int c=0;c<arch[l].n_in;c++){
-            //             //mw_d[l][b][c] = 0.9*mw_d[l][b][c]+0.1*jw_d[l][b][c];
-            //             arch[l].weights[b][c] -= LR*jw_d[l][b][c];
-            //         }
-            //         //mb_d[l][b] = 0.9*mb_d[l][b]+0.1*jb_d[l][b];
-            //         arch[l].biases[b] -= LR*jb_d[l][b];
-            //     }
-            // }
-
-
-        }
-
-        void print_size(){ // prints input/output size to `cout`, as well as number of trainable parameters
-            int n_param = 0;
-            if(num_of_conv > 0){
-                for(int l=0;l<num_of_conv;l++) if(arch[l].type == "conv") n_param += arch[l].out_d + arch[l].out_d*arch[l].inp_d*arch[l].f_v*arch[l].f_h;
-                cout << "Convolutional layers: [Input size: " << input_size_d << "x" << input_size_v << "x" << input_size_h << ", Output size: " << output_size_d << "x" << output_size_v << "x" << output_size_h;
-                cout << ", Number of parameters: " << n_param <<"]\n";
-            }
-            n_param = 0;
-            for(int i=num_of_conv;i<depth;i++) n_param += arch[i].n_out + arch[i].n_in*arch[i].n_out;
-            cout << "Dense layers: [Input size: " << input_size_dense << ", Output size: " << output_size_dense;
-            cout << ", Number of parameters: " << n_param << "]\n";
-        }
-
+    double ** m, ** v;
+    double beta1, beta2;
+    double beta1_n, beta2_n;
 };

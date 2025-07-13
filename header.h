@@ -1,12 +1,8 @@
-using namespace std;
-
-void here(int i){cout << "here " << i << endl; cout.flush();} // for debugging
-
-double rand_U(double width){ // uniform random number
-    return width*(2*(((double)rand())/RAND_MAX)-1);
+double rand_U(double width = 1.){ // uniform random number
+    return width*(2*(((double)dist(rng))/32767.)-1);
 }
 
-struct activation{
+struct activation_func{
     /*struct that encapsulates a function f:R->R and its derivative df:R->R. Optional, the name of the function.
     Default f(x) = softsign(x) = x/(1+|x|) a.k.a soft tanh.
     */
@@ -14,13 +10,13 @@ struct activation{
     double (*f)(double);
     double (*df)(double);
 
-    activation(){
+    activation_func(){
         f = [](double x)->double {return x/(1+abs(x));};
         df = [](double x)->double {return 1/((1+abs(x))*(1+abs(x)));};
         name = "soft tanh";
     }
 
-    activation(double(*activ)(double), double(*D_activ)(double), string s = ""){
+    activation_func(double(*activ)(double), double(*D_activ)(double), string s = ""){
         f = activ;
         df = D_activ;
         name = s;
@@ -49,16 +45,22 @@ struct loss{
 };
 
 //examples of activation functions (one unnamed). Note:  "->double" can be removed
-const activation softsign([](double x)->double {return x/(1.+abs(x));}, [](double x)->double {return 1./((1.+abs(x))*(1.+abs(x)));}, "soft tanh");
-const activation relu([](double x)->double {return x>0. ? x : 0.;}, [](double x)->double {return x>0. ? 1. : 0.;}, "ReLU");
-const activation id([](double x)->double {return x;}, [](double x)->double {return 1.;}, "identity");
-const activation sigmoid([](double x)->double {return 1./(1.+exp(-x));}, [](double x)->double {return 1./((1.+exp(-x))*(1.+exp(x)));}, "logistic");
-const activation quad([](double x)->double {return x*sqrt(x*x+1.);}, [](double x)->double {return (2.*x*x+1.)/sqrt(1.+x*x);});
+const activation_func softsign([](double x)->double {return x/(1.+abs(x));}, [](double x)->double {return 1./((1.+abs(x))*(1.+abs(x)));}, "soft sign");
+const activation_func relu([](double x)->double {return x>0. ? x : 0.;}, [](double x)->double {return x>0. ? 1. : 0.;}, "ReLU");
+const activation_func id([](double x)->double {return x;}, [](double x)->double {return 1.;}, "identity");
+const activation_func sigmoid([](double x)->double {return 1./(1.+exp(-x));}, [](double x)->double {return 1./((1.+exp(-x))*(1.+exp(x)));}, "logistic");
+const activation_func quad([](double x)->double {return x*sqrt(x*x+1.);}, [](double x)->double {return (2.*x*x+1.)/sqrt(1.+x*x);});
 
+//activation_func LReLU(double a){ // untested
+//    activation_func act([](double x)->double {return x>0. ? x : a*x;}, [](double x)->double {return x>0. ? 1. : a;}, "LReLU");
+//    return act;
+//}
 
 //examples of loss functions
 const loss least_sq([](double x,double y)->double {return 0.5*(x-y)*(x-y);}, [](double x, double y)->double {return x-y;}, "least squares");
 const loss log_like([](double x,double y)->double {return -y*log(x+.000000001)-(1-y)*log(1-x+.000000001);}, [](double x, double y)->double {return -y/(x+.000000001)+(1-y)/(1-x+.000000001);}, "cross-entropy");
+//TODO: define a version of `log_like` that takes logits directly, so one can drop the softmax layer
+
 
 void to_binary(int i, double * y, int L){ // L = len(y); y = binary representation of i
     y[L-1] = i%2;
@@ -99,28 +101,114 @@ void progress_bar_after(int i, int epochs, int max_bar = 20){
     }
 }
 
-bool softpad(int L, int l, int o, int & m, int & n){ // finds minimal m\in[0,l) such that L == n*l+m(2*l-m-1)-(n+2m)*o
-    for(m=0;m<l;m++){
-        n = L+m-2*l*m+m*m-o+2*m*o;
-        if( n % (l-o) == 0){
-            n /= l-o;
-            return true;
-        }
+// double shuffle(double * x, int size, int i){
+//     int pos = i;
+//     for (int j=size-1;j>pos;j--){
+//         int k = rand()%(j+1);
+//         if(k == pos) pos = j;
+//         else if(j == pos) pos = k;
+//     }
+//     return x[pos];
+// }
+
+void shuffle_samples(double ** x, double ** y, int n_samp){
+    //TODO: change rand() into dist(rng)
+    double * z;
+    int j;
+    for(int i=0;i<n_samp-1;i++){
+        j = i + (rand()%(n_samp-i));
+        z = x[i];
+        x[i] = x[j];
+        x[j] = z;
+        z = y[i];
+        y[i] = y[j];
+        y[j] = z;
     }
-    return false;
 }
 
-void softpad_range(int & start, int & end, int a, int l, int o, int m, int n){
-    if(a < m){
-        start = a*(l-m-o)+(a*(a-1))/2;
-        end = a*(l-m-o)+l-m+(a*(a+1))/2;
+void full_print(double * M, int n, ostream & os = cout){ // prints one-dimensional array
+    os << "{";
+    for(int i=0;i<n;i++){
+        os << fixed << setprecision(5) << (M[i]<0.?"":" ") << M[i] << (i<n-1?",":"}");
     }
-    else if(a >= m && a < m + n ){
-        start = a*(l-o)-(m*(m+1))/2;
-        end = l+a*(l-o)-(m*(m+1))/2;
+}
+void full_print(double * M, int n_v, int n_h, ostream & os = cout){ // prints two-dimensional array
+    os << "{";
+    for(int i=0;i<n_v;i++){
+        full_print(M+i,n_h,os);
+        os << (i<n_v-1?",\n ":"}");
+    }
+}
+void full_print(double * M, int n_d, int n_v, int n_h, ostream & os = cout){ // prints three-dimensional array
+    os << "{";
+    for(int i=0;i<n_d;i++){
+        full_print(M+i,n_v,n_h,os);
+        os << (i<n_d-1?",\n ":"}");
+    }
+}
+
+void short_print(double * M, int n, ostream & os = cout){ // prints a one-dimensional array, omitting entries in the middle
+    int max_n = 3;
+    if(n <= max_n){
+        full_print(M,n,os);
     }
     else{
-        start = a*(l+m+n-o)-m*(m+n)-(a*(a+1)+n*(n-1))/2;
-        end = a*(l+m+n-o)+l-1+o-m*(m+n-1)-(a*(a+3)+n*(n-3))/2;
+        os << "{";
+        for(int i=0;i<max_n-1;i++){
+            os << fixed << setprecision(5) << (M[i]<0.?"":" ") << M[i] << ",";
+        }
+        os << " ... ," << (M[n-1]<0.?"":" ") << M[n-1] << "}";
+    }
+}
+void short_print(double * M, int n_v, int n_h, ostream & os = cout){ // prints a two-dimensional array, omitting entries in the middle
+    int max_n = 3;
+    os << "{";
+    if(n_v <= max_n){
+        for(int j=0;j<n_v;j++){
+            short_print(M+j,n_h,os);
+            os << (j<n_v-1?",\n ":"}");
+        }
+    }
+    else{
+        for(int j=0;j<max_n-1;j++){
+            short_print(M+j,n_h,os);
+            os << "," << endl << " ";
+        }
+        if(n_h > max_n){
+            for(int j=0;j<max_n-1;j++) os << "      |  ";
+            os << "            |  \n ";
+        }
+        else{
+            for(int j=0;j<n_h;j++) os << "      |  ";
+            os << "\n ";
+        }
+        short_print(M+n_v-1,n_h,os);
+        os << "}";
+    }
+}
+void short_print(double * M, int n_d, int n_v, int n_h, ostream & os = cout){ // prints a three-dimensional array, omitting entries in the middle
+    int max_n = 3;
+    os << "{";
+    if(n_d <= max_n){
+        for(int j=0;j<n_d;j++){
+            short_print(M+j,n_v,n_h,os);
+            os << (j<n_d-1?",\n ":"}");
+        }
+    }
+    else{
+        for(int j=0;j<max_n-1;j++){
+            short_print(M+j,n_v,n_h,os);
+            os << "," << endl << " ";
+        }
+        if(n_h > max_n){
+            for(int j=0;j<max_n-1;j++) os << "     ||| ";
+            os << "           ||| \n ";
+        }
+        else{
+            for(int j=0;j<n_h;j++) os << "     ||| ";
+            os << "\n ";
+        }
+        short_print(M+n_d-1,n_v,n_h,os);
+        os << "}";
     }
 }

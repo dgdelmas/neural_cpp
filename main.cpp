@@ -2,147 +2,190 @@
 #include <fstream>
 #include <cmath>
 #include <cassert>
-#include <time.h>
+#include <random>
+#include <iomanip>
 
-#include "header.h"
+using namespace std;
+
+mt19937 rng(1);
+uniform_int_distribution<int> dist(0, 32767);
+
 #include "neural.h"
 
-void dense();
+void fully_connected();
 void mnist();
 void cifar();
 
 int main(){
-    //dense();
+
+    fully_connected();
     //mnist();
-    cifar();
+    //cifar();
 
     return 0;
 }
 
-void dense(){
-    int depth = 6; // number of layers
-    layer L[depth]; // array of neurons
-    L[0].set("dense", 32); // first layer, with 32 neurons
-    L[1].set("dense", 16); // second layer, with 16 neurons
-    L[2].set("dense", 8);  // third layer, with 8 neurons
-    L[3].set("dense", 4);  // fourth layer, with 4 neurons
-    L[4].set("dense", 2);  // fifth layer, with 2 neurons
-    L[5].set("softmax");
 
-    L[1].activ = relu;
-    L[4].activ = id;
+void fully_connected(){
 
-    int n_in = 5; // input size
-    network N({n_in}, L, depth);
+    input i(5);
+    dense d1(32), d2(16), d3(8), d4(4), d5(2);
+    network N{&i,&d1,&d2,&d3,&d4,&d5};
+    d2.activ = relu;
+    d5.activ = id;
+
     N.randomize(/*scale = */ 0.7);
-    //cout << N << endl;
+    //N.print();
+
+    double * x; // input to pass through the network
+    x = new double[5];
+    for(int i=0;i<5;i++) x[i] = (i+1)/10.;
+
+    N.forward(x); // perform forward pass.
+
+    for(int l=0;l<6;l++){ // print activations (hidden and output layers)
+        cout << "activations of layer " << l << ": ";
+        for(int i=0;i<N.output_size(l);i++) cout << N.activation(l,i) << " ";
+        cout << endl;
+    }
+
+    //cout << "activations of last layer: " << N.activation(0) << " " << N.activation(1) << endl; // print output layer directly
 
     int n_samp = 7776; // number of samples
-    double ** X, ** Y;
-    
-    X = new double*[n_samp]; // declare predictor
-    Y = new double*[n_samp]; // declare response
-    for(int i=0;i<n_samp;i++) X[i] = new double[n_in];
+    double ** X, ** Y; // predictor and response
+
+    X = new double*[n_samp];
+    Y = new double*[n_samp];
+    for(int i=0;i<n_samp;i++) X[i] = new double[5];
     for(int i=0;i<n_samp;i++) Y[i] = new double[2];
-    
+
     // uniform grid in [0,1]^5
-    for(int i1=0;i1<6;i1++) for(int i2=0;i2<6;i2++) for(int i3=0;i3<6;i3++) for(int i4=0;i4<6;i4++) for(int i5=0;i5<6;i5++) X[i1+6*i2+36*i3+216*i4+1296*i5][0] = i1/5.;
-    for(int i1=0;i1<6;i1++) for(int i2=0;i2<6;i2++) for(int i3=0;i3<6;i3++) for(int i4=0;i4<6;i4++) for(int i5=0;i5<6;i5++) X[i1+6*i2+36*i3+216*i4+1296*i5][1] = i2/5.;
-    for(int i1=0;i1<6;i1++) for(int i2=0;i2<6;i2++) for(int i3=0;i3<6;i3++) for(int i4=0;i4<6;i4++) for(int i5=0;i5<6;i5++) X[i1+6*i2+36*i3+216*i4+1296*i5][2] = i3/5.;
-    for(int i1=0;i1<6;i1++) for(int i2=0;i2<6;i2++) for(int i3=0;i3<6;i3++) for(int i4=0;i4<6;i4++) for(int i5=0;i5<6;i5++) X[i1+6*i2+36*i3+216*i4+1296*i5][3] = i4/5.;
-    for(int i1=0;i1<6;i1++) for(int i2=0;i2<6;i2++) for(int i3=0;i3<6;i3++) for(int i4=0;i4<6;i4++) for(int i5=0;i5<6;i5++) X[i1+6*i2+36*i3+216*i4+1296*i5][4] = i5/5.;
+    for (int i=0;i<n_samp;i++){
+        int k = i;
+        for(int j=0;j<5;j++){
+            X[i][j] = (k%6)/5.;
+            k /= 6;
+        }
+    }
 
     // model to be learned
     for(int s=0;s<n_samp;s++) Y[s][0] = sin(X[s][0]+X[s][1]+X[s][2]+X[s][3]+X[s][4]);
     for(int s=0;s<n_samp;s++) Y[s][1] = 0.2*(cos(X[s][0]-X[s][1]+X[s][2]-X[s][3]+X[s][4])+X[s][2]-X[s][4]);
 
-    N.train(X, Y, n_samp, /*batch_size=*/n_samp, /*learning_rate=*/.02, /*num_of_epochs=*/20);
+    shuffle_samples(X,Y,n_samp);
+
+    int n_tr = 7000; // training set
+
+    cout << "mean L2 error before training: " << N.cost(X,Y,n_samp) << endl;
+
+    SGD optim(&N); // declare stochastic gradient descent optimizer (with momentum)
+    optim.train(X, Y, n_tr, /*batch_size=*/1000, /*learning_rate=*/1, /*num_of_epochs=*/100, /*progress_bar=*/ false);
+
+    cout << "mean L2 error after training, training set: " << N.cost(X,Y,n_tr) << endl;
+    cout << "mean L2 error after training, testing set: " << N.cost(X+n_tr,Y+n_tr,n_samp-n_tr) << endl;
 
     // check that it worked
-    for(int s=1000;s<1000+6;s++) cout << "(" << Y[s][0] << "," << Y[s][1] << ") "; cout << endl;
+    for(int s=7000;s<7000+6;s++) cout << "(" << Y[s][0] << "," << Y[s][1] << ") "; cout << endl;
     cout << "vs" << endl;
 
-    for(int s=1000;s<1000+6;s++){
+    for(int s=7000;s<7000+6;s++){
         N.forward(X[s]);
-        cout << "(" << N[depth-1][0] << "," << N[depth-1][1] << ") ";
+        cout << "(" << N.activation(0) << "," << N.activation(1) << ") ";
     }
     cout << endl;
+
+    delete[] x;
+    delete[] X;
+    delete[] Y;
+
 }
 
 void mnist(){
-    int n_samp = 60000, in_v = 28, in_h = 28;
 
-    double *** x;
-    x = new double**[n_samp];
-    for(int s=0;s<n_samp;s++) x[s] = new double*[in_v];
-    for(int s=0;s<n_samp;s++) for(int i=0;i<in_v;i++) x[s][i] = new double[in_h];
-    double ** y;
+    input i(28,28);
+    conv c1(5), c2(8,5,5,3,3);
+    dense d(10);
+    softmax sm;
+    network N{&i,&c1,&c2,&d,&sm};
+    c1.activ = relu;
+    c2.activ = relu;
+    d.activ = id;
+
+    N.randomize();
+    //N.print();
+
+
+    int n_samp = 60000; // number of samples in the mnist dataset
+    double ** x, ** y;
+    x = new double*[n_samp];
     y = new double*[n_samp];
-    for(int i=0;i<n_samp;i++) y[i] = new double[10];
-    for(int i=0;i<n_samp;i++) for(int j=0;j<10;j++) y[i][j] = 0;
+
 
     ifstream file("mnist.csv"); // change path to your local file
     assert(file); // check that file loaded correctly
     string str;
-    for(int line=0;line<n_samp;line++){
+    for(int line=0;line<n_samp;line++){ // load data (details depend on how your mnist file is formatted)
+        x[line] = new double[28*28];
+        y[line] = new double[10];
         getline(file, str, ',');
+        for(int i=0;i<10;i++) y[line][i] = 0;
         y[line][stoi(str)] = 1;
-        for(int i=0;i<in_v*in_h;i++){
+        for(int i=0;i<28*28;i++){
             getline(file, str, ',');
-            x[line][(i-(i%in_h))/in_v][i%in_h] = stod(str)/255.;
+            x[line][i] = stod(str)/255.;
         }
     }
     file.close();
 
-    int depth = 4; // number of layers
-    layer L[depth];
-    L[0].set("conv", 5); L[0].activ = relu; // first conv layer, with five filters
-    L[1].set("conv", 8); L[1].activ = relu; // second conv layer, with eight filters
-    L[2].set("dense", 10); L[2].activ = id; // one dense layer, with 10 neurons
-    L[3].set("softmax");                    // a softmax layer at the end
+    int n_tr = 58000; // training set
 
-    L[1].set_filter_size(5); // change filter size
-    L[1].set_stride(3); // change stride
+    Adam optim(&N); // we use an Adam optimizer
+    optim.loss_fnc = log_like;
+    optim.train(x, y, n_tr, /*batch_size=*/40, /*learning_rate=*/.02, /*num_of_epochs=*/1);
 
-    network N({in_v,in_h}, L, depth);
-    N.loss_fnc = log_like;
-    N.randomize();
-
-    int n_tr = 58000;
-    N.train(x, y, n_tr, /*batch_size=*/50, /*learning_rate=*/.01, /*num_of_epochs=*/2);
-
-
+    // check accuracy:
     double correct = 0, all = 0;
     int max = 0;
     for(int s=0;s<n_tr;s++){
         all++;
         N.forward(x[s]);
-        for(int i=0;i<10;i++) max = N.arch[depth-1].p_d[i]>N.arch[depth-1].p_d[max] ? i:max;
+        for(int i=0;i<10;i++) max = N.activation(i)>N.activation(max) ? i:max;
         correct += y[s][max];
     }
     cout << "Train accuracy: " << 100*correct/all << "%\n";
 
-    correct = 0;
-    all = 0;
+    correct = 0, all = 0;
     max = 0;
     for(int s=0;s<n_samp-n_tr;s++){
         all++;
         N.forward(x[s+n_tr]);
-        for(int i=0;i<10;i++) max = N.arch[depth-1].p_d[i]>N.arch[depth-1].p_d[max] ? i:max;
+        for(int i=0;i<10;i++) max = N.activation(i)>N.activation(max) ? i:max;
         correct += y[s+n_tr][max];
     }
     cout << "Test accuracy: " << 100*correct/all << "%\n";
 
+
+    delete[] x;
+    delete[] y;
+
 }
 
 void cifar(){
-    int n_samp = 30000, in_d = 3, in_v = 32, in_h = 32;
 
-    double **** x;
-    x = new double***[n_samp];
-    for(int s=0;s<n_samp;s++) x[s] = new double**[in_d];
-    for(int s=0;s<n_samp;s++) for(int i=0;i<in_d;i++) x[s][i] = new double*[in_v];
-    for(int s=0;s<n_samp;s++) for(int i=0;i<in_d;i++) for(int j=0;j<in_v;j++) x[s][i][j] = new double[in_h];
+    input i(3,32,32);
+    conv c1(5), c2(8,5,5,2,2);
+    maxpool mp;
+    dense d(10);
+    softmax sm;
+    network N{&i,&c1,&mp,&c2,&d,&sm};
+    d.activ = id;
+
+    N.randomize();
+
+    int n_samp = 30000;
+    double ** x;
+    x = new double*[n_samp];
+    for(int s=0;s<n_samp;s++) x[s] = new double[3*32*32];
     double ** y;
     y = new double*[n_samp];
     for(int i=0;i<n_samp;i++) y[i] = new double[10];
@@ -151,11 +194,9 @@ void cifar(){
     assert(file1);
     string str;
     for(int line=0;line<n_samp;line++){
-        for(int j=0;j<in_d;j++){
-            for(int i=0;i<in_v*in_h;i++){
-                getline(file1, str, ',');
-                x[line][j][(i-(i%in_h))/in_v][i%in_h] = stod(str)/255.;
-            }
+        for(int j=0;j<3*32*32;j++){
+            getline(file1, str, ',');
+            x[line][j] = stod(str)/255.;
         }
     }
     file1.close();
@@ -169,43 +210,33 @@ void cifar(){
     file2.close();
 
 
-    int depth = 5;
-    layer L[depth];
-    L[0].set("conv",5);
-    L[1].set("maxpool"); L[1].set_filter_size(2);
-    L[2].set("conv",8);
-    L[3].set("dense",10); L[3].activ = id;
-    L[4].set("softmax");
+    int n_tr = 28800; // training set
 
-    network N({in_d,in_v,in_h},L,depth);
-    N.loss_fnc = log_like;
-    N.randomize();
-    //N.read_from_file();
+    Adam optim(&N); // we use an Adam optimizer
+    optim.loss_fnc = log_like;
+    optim.train(x, y, n_tr, /*batch_size=*/64, /*learning_rate=*/.005, /*num_of_epochs=*/35);
 
-    int n_tr = 28800;
+    // check accuracy:
     double correct = 0, all = 0;
     int max = 0;
-
-    N.train(x, y, n_tr, /*batch_size=*/64, /*learning_rate=*/.005, /*num_of_epochs=*/35);
-
-    correct = 0, all = 0;
-    max = 0;
     for(int s=0;s<n_tr;s++){
         all++;
         N.forward(x[s]);
-        for(int i=0;i<10;i++) max = N.arch[depth-1].p_d[i]>N.arch[depth-1].p_d[max] ? i:max;
+        for(int i=0;i<10;i++) max = N.activation(i)>N.activation(max) ? i:max;
         correct += y[s][max];
     }
-    cout << "Train accuracy: " << 100*correct/all << "%" << endl;
+    cout << "Train accuracy: " << 100*correct/all << "%\n";
 
     correct = 0, all = 0;
     max = 0;
     for(int s=0;s<n_samp-n_tr;s++){
         all++;
         N.forward(x[s+n_tr]);
-        for(int i=0;i<10;i++) max = N.arch[depth-1].p_d[i]>N.arch[depth-1].p_d[max] ? i:max;
+        for(int i=0;i<10;i++) max = N.activation(i)>N.activation(max) ? i:max;
         correct += y[s+n_tr][max];
     }
-    cout << "Test accuracy: " << 100*correct/all << "%" << endl << endl;
+    cout << "Test accuracy: " << 100*correct/all << "%\n";
+
+
 
 }

@@ -13,7 +13,7 @@ The basic object is the `layer` class, which has several default methods such as
 The `network` class works with any subclass inherited from `layer`, as long as the various default methods have been overriden appropriately. See the predefined options (`dense`, `conv`, etc.) for practical examples. See also the companion pdf for the explanation of some of the math behind the code.
 
 
-Example of usage:
+## Examples:
 
 Say we want a network that takes a `5`-dimensional array as input, and passes it through five dense layers, with `32`, `16`, `8`, `4`, `2` neurons, respectively. First, we declare the layers as follows:
 

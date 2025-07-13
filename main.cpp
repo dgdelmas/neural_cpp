@@ -102,11 +102,13 @@ void fully_connected(){
 
 void mnist(){
 
-    input i(28,28);
-    conv c1(5), c2(8,5,5,3,3);
-    dense d(10);
+    input i(28,28); // declare input size
+    conv c1(5), c2(8,5,5,3,3); // two conv layers, the first one with default size and stride, the second one 5x5 with a stride of `(s_v,s_h) = (3,3)`
+    dense d(10); // dense layer with ten outputs, for the 10 classes
     softmax sm;
     network N{&i,&c1,&c2,&d,&sm};
+
+    // change activation functions
     c1.activ = relu;
     c2.activ = relu;
     d.activ = id;
@@ -119,7 +121,6 @@ void mnist(){
     double ** x, ** y;
     x = new double*[n_samp];
     y = new double*[n_samp];
-
 
     ifstream file("mnist.csv"); // change path to your local file
     assert(file); // check that file loaded correctly

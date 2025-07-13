@@ -79,7 +79,7 @@ void fully_connected(){
     cout << "mean L2 error before training: " << N.cost(X,Y,n_samp) << endl;
 
     SGD optim(&N); // declare stochastic gradient descent optimizer (with momentum)
-    optim.train(X, Y, n_tr, /*batch_size=*/1000, /*learning_rate=*/1, /*num_of_epochs=*/100, /*progress_bar=*/ false);
+    optim.train(X, Y, n_tr, /*batch_size=*/1000, /*learning_rate=*/1, /*num_of_epochs=*/100, /*progress_bar=*/false);
 
     cout << "mean L2 error after training, training set: " << N.cost(X,Y,n_tr) << endl;
     cout << "mean L2 error after training, testing set: " << N.cost(X+n_tr,Y+n_tr,n_samp-n_tr) << endl;
@@ -173,9 +173,9 @@ void mnist(){
 
 void cifar(){
 
-    input i(3,32,32);
+    input i(3,32,32); // this dataset has three color channels
     conv c1(5), c2(8,5,5,2,2);
-    maxpool mp;
+    maxpool mp; // we add a pooling layer
     dense d(10);
     softmax sm;
     network N{&i,&c1,&mp,&c2,&d,&sm};
@@ -197,7 +197,7 @@ void cifar(){
     for(int line=0;line<n_samp;line++){
         for(int j=0;j<3*32*32;j++){
             getline(file1, str, ',');
-            x[line][j] = stod(str)/255.;
+            x[line][j] = stod(str)/255.; // load predictor
         }
     }
     file1.close();
@@ -206,7 +206,7 @@ void cifar(){
     for(int line=0;line<n_samp;line++){
         getline(file2, str, ',');
         for(int i=0;i<10;i++) y[line][i] = 0;
-        y[line][stoi(str)] = 1;
+        y[line][stoi(str)] = 1; // load response
     }
     file2.close();
 

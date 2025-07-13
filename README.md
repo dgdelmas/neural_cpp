@@ -1,6 +1,6 @@
 # Neural Network in C++
 
-`neural.h` is a straightforward implementation of netural networks in C++. The usual basic layer types (dense, convolutional, maxpool, softmax) are implemented. The code is structured in such a way that adding new layer types should be relatively straightforward.
+`neural.h` is a straightforward implementation of neural networks in C++. The usual basic layer types (dense, convolutional, maxpool, softmax) are implemented. The code is structured in such a way that adding new layer types should be relatively straightforward.
 
 The basic object is the `layer` class, which has several default methods such as `init` (for "initialize"), `forward` (for the forward pass), `backward` (for the backward pass), etc. Defining a new layer type is done via subclasses, which should override these methods (and add new ones, if necessary):
 
@@ -10,7 +10,7 @@ The basic object is the `layer` class, which has several default methods such as
         }
     };
 
-The `network` class works with any subclass inherited from `layer`, as long as the various default methods have been overriden appropriately. See the predefined options (`dense`, `conv`, etc.) for practical examples. See also the companion pdf for the explanation of some of the math behind the code.
+The `network` class works with any subclass inherited from `layer`, as long as the various default methods have been overridden appropriately. See the predefined options (`dense`, `conv`, etc.) for practical examples. See also the companion pdf for the explanation of some of the math behind the code.
 
 
 ## Examples:
@@ -33,7 +33,7 @@ It is sometimes useful to use this for the last layer:
 
     d5.activ = id;
 
-For now, all these layers are independent. We will assamble them into a network next. We do this by feeding the addresses of these layers to an instance of the `network` class:
+For now, all these layers are independent. We will assemble them into a network next. We do this by feeding the addresses of these layers to an instance of the `network` class:
 
     network N{&i,&d1,&d2,&d3,&d4,&d5};
 
@@ -166,7 +166,7 @@ Next, we load the data. I have a local csv file with `60000` lines, each of whic
 
 Note that we are using a one-hot representation for `y`, where `y=(0,...,0,1,0,...,0)`.
 
-Let us use `n_tr = 58000` samples for training, and the remaining `n_samp - n_tr = 2000` for testing. Instead of stochastic gradient descent, let us speed up the training by switching into the Adam optimizer. Given that this dataset is relatively easy to learn, we can use a very small mini-batch, say, a size `40`, and, consequentely, a single pass should be enough (i.e., a single epoch). So we can run
+Let us use `n_tr = 58000` samples for training, and the remaining `n_samp - n_tr = 2000` for testing. Instead of stochastic gradient descent, let us speed up the training by switching into the Adam optimizer. Given that this dataset is relatively easy to learn, we can use a very small mini-batch, say, a size `40`, and, consequently, a single pass should be enough (i.e., a single epoch). So we can run
 
     int n_tr = 58000; // training set
 

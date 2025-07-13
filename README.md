@@ -170,7 +170,9 @@ Let us use `n_tr = 58000` samples for training, and the remaining `n_samp - n_tr
     optim.loss_fnc = log_like;
     optim.train(x, y, n_tr, /*batch_size=*/40, /*learning_rate=*/.02, /*num_of_epochs=*/1);
 
-Note that, unlike before, here we do not turn off the progress bar (i.e., we didn't add the line `/*progress_bar=*/ false`). So here we see the progress on the console. In any case, in just shy of a minute, training is done. We can test the result by checking the accuracy on both the training and the testing sets:
+Note that, unlike before, here we do not turn off the progress bar (i.e., we didn't add the line `/*progress_bar=*/ false`). So here we see the progress on the console. Also, we have changed the default loss function from the default "least squares" into "cross entropy", which is more useful when dealing with categorical data.
+
+In any case, in just shy of a minute, training is done. We can test the result by checking the accuracy on both the training and the testing sets:
 
     // check accuracy:
     double correct = 0, all = 0;
@@ -195,3 +197,56 @@ Note that, unlike before, here we do not turn off the progress bar (i.e., we did
 
 
 This returns `94.6%` and `96.9` accuracy, respectively. Pretty decent.
+
+Finally, we consider a more complicated example, the CIFAR10 dataset. This is famously a harder dataset, so we use more or less the same architecture, but we add a pooling layer in between the convolutional layers to speed up the process.
+
+So our network looks like so:
+
+    input i(3,32,32); // this dataset has three color channels
+    conv c1(5), c2(8,5,5,2,2);
+    maxpool mp; // add maxpool layer
+    dense d(10);
+    softmax sm;
+    network N{&i,&c1,&mp,&c2,&d,&sm};
+    d.activ = id;
+
+We load the samples as usual (I only use `30000` samples to make things easier for me; this is for illustration purposes only).
+
+    N.randomize();
+
+    int n_samp = 30000;
+    double ** x;
+    x = new double*[n_samp];
+    for(int s=0;s<n_samp;s++) x[s] = new double[3*32*32];
+    double ** y;
+    y = new double*[n_samp];
+    for(int i=0;i<n_samp;i++) y[i] = new double[10];
+
+    ifstream file1("cifar10.txt");
+    assert(file1);
+    string str;
+    for(int line=0;line<n_samp;line++){
+        for(int j=0;j<3*32*32;j++){
+            getline(file1, str, ',');
+            x[line][j] = stod(str)/255.; // load predictor
+        }
+    }
+    file1.close();
+    ifstream file2("cifar10_y.txt");
+    assert(file2);
+    for(int line=0;line<n_samp;line++){
+        getline(file2, str, ',');
+        for(int i=0;i<10;i++) y[line][i] = 0;
+        y[line][stoi(str)] = 1; // load response
+    }
+    file2.close();
+
+We use `28800` samples for training and the rest for testing. We use a smaller learning rate than before, a slightly larger mini-batch, and more epochs:
+
+    int n_tr = 28800; // training set
+
+    Adam optim(&N); // we use an Adam optimizer
+    optim.loss_fnc = log_like;
+    optim.train(x, y, n_tr, /*batch_size=*/64, /*learning_rate=*/.005, /*num_of_epochs=*/35);
+
+After around 25 minutes training is done, and we find a `50%` accuracy rate on both the training and the testing sets. Not bad for such a small model, although one could definitely do better, by e.g. using the full dateset instead of only half of it, a larger/deeper network, and a longer training process. We leave this to the user if they want to explore further.
